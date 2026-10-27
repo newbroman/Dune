@@ -76,6 +76,43 @@ class Store private constructor(ctx: Context) {
     val showSky = Flag("showSky", true)
     val groupRules = Str("groupRules", DEFAULT_GROUP_RULES)
 
+    // Polish and assistant
+    val polishClock = Flag("polishClock", true)
+    val showPhrase = Flag("showPhrase", true)
+    val showAssistant = Flag("showAssistant", true)
+    val showWidgets = Flag("showWidgets", true)
+
+    // Drive mode
+    val driveAuto = Flag("driveAuto", true)
+    val driveReadAloud = Flag("driveReadAloud", true)
+    val homeAddress = Str("homeAddress", "")
+    var carDevices by mutableStateOf(readList("carDevices").toSet())
+        private set
+    fun setCar(address: String, on: Boolean) {
+        carDevices = if (on) carDevices + address else carDevices - address
+        writeList("carDevices", carDevices.toList())
+    }
+
+    // Widgets placed on the home screen, in order
+    var widgets by mutableStateOf(readWidgets())
+        private set
+    private fun saveWidgets(l: List<PlacedWidget>) {
+        widgets = l; writeList("widgets", l.map { "${it.id}:${it.heightDp}" })
+    }
+    private fun readWidgets() = readList("widgets").mapNotNull {
+        val (i, h) = it.split(':').let { p -> p.getOrNull(0)?.toIntOrNull() to p.getOrNull(1)?.toIntOrNull() }
+        if (i != null) PlacedWidget(i, h ?: 120) else null
+    }
+    fun addWidget(id: Int, heightDp: Int) = saveWidgets(widgets.filterNot { it.id == id } + PlacedWidget(id, heightDp))
+    fun dropWidget(id: Int) = saveWidgets(widgets.filterNot { it.id == id })
+    fun moveWidget(id: Int, by: Int) {
+        val l = widgets.toMutableList(); val i = l.indexOfFirst { it.id == id }; val j = i + by
+        if (i < 0 || j !in l.indices) return
+        val w = l.removeAt(i); l.add(j, w); saveWidgets(l)
+    }
+    fun resizeWidget(id: Int, byDp: Int) =
+        saveWidgets(widgets.map { if (it.id == id) it.copy(heightDp = (it.heightDp + byDp).coerceIn(60, 600)) else it })
+
     // Groups: user-made group names, and per-app group choices (app key -> group)
     var customGroups by mutableStateOf(readList("customGroups"))
         private set

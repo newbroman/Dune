@@ -32,7 +32,7 @@ data class AppEntry(
     val key get() = "$pkg/$cls/$serial"
 }
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
@@ -131,12 +131,39 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         override fun onPackagesUnavailable(p: Array<out String>?, u: UserHandle?, r: Boolean) = loadApps()
     }
 
+    // ---------- assistant, Polish, drive
+
+    /** Last thing the assistant said, shown under the ask bar. */
+    var assistantReply by mutableStateOf<String?>(null)
+    /** A request Dune couldn't handle itself: offer Claude / Gemini / Google. */
+    var assistantFallback by mutableStateOf<String?>(null)
+    var pendingReply by mutableStateOf<PendingReply?>(null)
+    val media = MediaWatcher(app)
+
+    private var phrases by mutableStateOf<List<Phrase>>(emptyList())
+    var phraseOffset by mutableIntStateOf(0)
+    val phrase: Phrase? get() = Phrases.forDay(phrases, java.time.LocalDate.now(), phraseOffset)
+
     init {
         la.registerCallback(cb, Handler(Looper.getMainLooper()))
         loadApps()
+        Drive.init(app)
+        viewModelScope.launch {
+            phrases = Phrases.all(app)
+            Phrases.refresh(app)
+            phrases = Phrases.all(app)
+        }
+        viewModelScope.launch {
+            var first = true
+            Drive.active.collect { on ->
+                if (on && (!first || screen == Screen.HOME)) screen = Screen.DRIVE
+                if (!on && screen == Screen.DRIVE) screen = Screen.HOME
+                first = false
+            }
+        }
     }
 
-    override fun onCleared() { la.unregisterCallback(cb) }
+    override fun onCleared() { la.unregisterCallback(cb); media.stop() }
 
     fun loadApps() {
         appsJob?.cancel()
@@ -294,7 +321,9 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     fun goHome() {
         if (screen == Screen.SETTINGS) afterSettings()
-        screen = Screen.HOME
+        assistantFallback = null
+        // While driving, Home returns to the Drive screen.
+        screen = if (Drive.active.value && screen != Screen.DRIVE) Screen.DRIVE else Screen.HOME
         resumeTick++
     }
 

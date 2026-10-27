@@ -59,6 +59,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -113,6 +114,8 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.DRAWER -> DrawerScreen(vm)
                     Screen.SETTINGS -> SettingsScreen(vm)
                     Screen.GROUP -> GroupScreen(vm)
+                    Screen.DRIVE -> DriveScreen(vm)
+                    Screen.WIDGET_PICK -> WidgetPickerScreen(vm)
                 }
             }
             vm.moving?.let { MoveDialog(vm, it) }
@@ -164,7 +167,10 @@ fun HomeScreen(vm: LauncherVM) {
                 )
             }
             item { ClockBlock(vm) }
+            if (s.showAssistant.value) item { AssistantBlock(vm) }
+            if (s.showPhrase.value) item { PhraseBlock(vm) }
             if (s.showWeather.value) item { WeatherBlock(vm) }
+            if (s.showWidgets.value) item { WidgetsBlock(vm) }
             if (s.showNotifs.value) item { NotificationsBlock(vm) }
             if (s.showTasks.value) item { TasksBlock(s) }
             if (s.showGroups.value) item { GroupsBlock(vm) }
@@ -180,6 +186,11 @@ fun HomeScreen(vm: LauncherVM) {
             Text(
                 "settings", color = Dim, fontSize = 14.sp,
                 modifier = Modifier.combinedClickable { vm.screen = Screen.SETTINGS }.padding(vertical = 12.dp)
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "drive", color = Dim, fontSize = 14.sp,
+                modifier = Modifier.combinedClickable { Drive.set(ctx, true); vm.screen = Screen.DRIVE }.padding(vertical = 12.dp)
             )
             Spacer(Modifier.weight(1f))
             Text(
@@ -235,10 +246,81 @@ private fun ClockBlock(vm: LauncherVM) {
         fontWeight = FontWeight.Thin,
         modifier = Modifier.padding(top = 36.dp).combinedClickable { Actions.openClock(ctx) }
     )
-    Text(
+    if (vm.store.polishClock.value) {
+        Text(
+            PolishTime.dateLine(now.toLocalDate()), color = Dim, fontSize = 18.sp,
+            modifier = Modifier.combinedClickable(onLongClick = { Actions.openCalendar(ctx) }) {
+                Speaker.speak(ctx, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL)
+            }
+        )
+        Text(
+            PolishTime.timeWords(now.hour, now.minute), color = Sand.copy(alpha = 0.85f), fontSize = 16.sp,
+            modifier = Modifier.padding(top = 2.dp).combinedClickable {
+                Speaker.speak(ctx, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL)
+            }
+        )
+    } else Text(
         now.format(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.UK)), color = Dim, fontSize = 18.sp,
         modifier = Modifier.combinedClickable { Actions.openCalendar(ctx) }
     )
+}
+
+@Composable
+private fun PhraseBlock(vm: LauncherVM) {
+    val ctx = LocalContext.current
+    val p = vm.phrase ?: return
+    Header("Phrase of the day", "another") { vm.phraseOffset++ }
+    Column(
+        Modifier.fillMaxWidth().combinedClickable(
+            onLongClick = { ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(Phrases.APP_URL))) },
+            onClick = { Speaker.speak(ctx, p.pl, PolishTime.PL) },
+        ).padding(vertical = 4.dp)
+    ) {
+        Text((if (p.emoji.isNotBlank()) p.emoji + "  " else "") + p.pl, color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light)
+        Text(p.en, color = Dim, fontSize = 15.sp)
+        if (p.note.isNotBlank()) Text(p.note, color = Dim.copy(alpha = 0.7f), fontSize = 13.sp,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+@Composable
+private fun AssistantBlock(vm: LauncherVM) {
+    val act = LocalContext.current as MainActivity
+    var q by rememberSaveable { mutableStateOf("") }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val submit = { if (q.isNotBlank()) { act.handleAsk(q.trim()); q = ""; keyboard?.hide() } }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 22.dp)
+            .border(1.dp, Faint, RoundedCornerShape(26.dp)).padding(start = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicTextField(
+            value = q, onValueChange = { q = it },
+            textStyle = TextStyle(color = Fg, fontSize = 17.sp), cursorBrush = SolidColor(Sand), singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go, capitalization = KeyboardCapitalization.Sentences),
+            keyboardActions = KeyboardActions(onGo = { submit() }),
+            modifier = Modifier.weight(1f).padding(vertical = 14.dp),
+            decorationBox = { inner -> Box { if (q.isEmpty()) Text("Ask Dune…", color = Faint, fontSize = 17.sp); inner() } },
+        )
+        Text(
+            "🎤", fontSize = 22.sp,
+            modifier = Modifier.combinedClickable(onLongClick = { act.tryStart(Intent(Intent.ACTION_VOICE_COMMAND)) }) {
+                act.listen("Ask Dune") { it?.let { t -> act.handleAsk(t) } }
+            }.padding(horizontal = 16.dp, vertical = 10.dp)
+        )
+    }
+    vm.assistantReply?.let {
+        Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
+            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null })
+    }
+    vm.assistantFallback?.let { f ->
+        FlowRow(Modifier.padding(top = 6.dp)) {
+            Chip("Ask Claude") { Assistant.askClaude(act, f); vm.assistantFallback = null }
+            Chip("Ask Gemini") { Assistant.askGemini(act, f); vm.assistantFallback = null }
+            Chip("Google") { Assistant.askGoogle(act, f); vm.assistantFallback = null }
+            Chip("Translate") { Actions.translate(act, f); vm.assistantFallback = null }
+        }
+    }
 }
 
 @Composable
@@ -568,6 +650,10 @@ fun SettingsScreen(vm: LauncherVM) {
 
         item { Header("Home screen") }
         item { Toggle("24-hour clock", s.clock24) }
+        item { Toggle("Date and time in Polish", s.polishClock) }
+        item { Toggle("Ask bar (assistant)", s.showAssistant) }
+        item { Toggle("Polish phrase of the day", s.showPhrase) }
+        item { Toggle("Widgets", s.showWidgets) }
         item { Toggle("Weather", s.showWeather) }
         item { Toggle("Notifications", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
@@ -577,6 +663,17 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Termux shortcuts", s.showTermux) }
         item { Toggle("L14", s.showL14) }
         item { Toggle("Open keyboard with app list", s.autoKeyboard) }
+
+        item { Header("Drive mode") }
+        item {
+            Note("Drive mode opens when your phone connects to a car below, and closes when it disconnects. " +
+                "It reads new messages aloud and lets you reply by voice.")
+            Field("Home address (for “navigate home”)", s.homeAddress)
+        }
+        item { Toggle("Start automatically in the car", s.driveAuto) }
+        item { Toggle("Read new messages aloud", s.driveReadAloud) }
+        item { CarPicker(vm) }
+        item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
         item { Header("Weather") }
         item { Field("Place (blank = phone location)", s.weatherPlace) }
@@ -615,7 +712,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.7", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.8", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -849,5 +946,36 @@ private fun GridLink(vm: LauncherVM, p: Pinned) {
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Remove link") }, onClick = { menu = false; vm.store.removePinned(p) })
         }
+    }
+}
+
+@Composable
+private fun CarPicker(vm: LauncherVM) {
+    val act = LocalContext.current as MainActivity
+    val s = vm.store
+    var tick by remember { mutableIntStateOf(0) }
+    val devices = remember(tick) { Drive.pairedDevices(act) }
+    if (!Drive.hasBtPermission(act) || devices.isEmpty()) {
+        LinkRow("Choose your car's Bluetooth") {
+            val after: () -> Unit = {
+                tick++
+                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                    act.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED)
+                    act.requestPerm(Manifest.permission.POST_NOTIFICATIONS) { }
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 31) act.requestPerm(Manifest.permission.BLUETOOTH_CONNECT) { ok ->
+                if (ok) after() else { act.toast("Allow Nearby devices so Dune can see your car"); Actions.appSettings(act) }
+            } else after()
+        }
+        if (Drive.hasBtPermission(act) && devices.isEmpty()) Note("No paired Bluetooth devices – pair the car in Android settings first.")
+        return
+    }
+    Note("Tick your car(s):")
+    devices.forEach { (name, addr) ->
+        val on = addr in s.carDevices
+        Text(
+            (if (on) "☑  " else "☐  ") + name, color = if (on) Sand else Fg, fontSize = 17.sp,
+            modifier = Modifier.fillMaxWidth().combinedClickable { s.setCar(addr, !on) }.padding(vertical = 8.dp)
+        )
     }
 }

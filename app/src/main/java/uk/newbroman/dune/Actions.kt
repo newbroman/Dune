@@ -54,6 +54,33 @@ object Actions {
         if (!ok) ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=" + Uri.encode(q))))
     }
 
+    const val SPHERES_URL = "https://newbroman.github.io/Music_of_the_Spheres/"
+
+    /** The installed Music of the Spheres app if there is one, otherwise the website. */
+    fun openSpheres(ctx: Context) {
+        val la = ctx.getSystemService(android.content.pm.LauncherApps::class.java)
+        val app = la.getActivityList(null, android.os.Process.myUserHandle())
+            .firstOrNull { it.label.toString().contains("spheres", true) && !it.componentName.packageName.startsWith("org.chromium.webapk") }
+        if (app == null || !ctx.launchPackage(app.componentName.packageName))
+            ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(SPHERES_URL)))
+    }
+
+    /** Turn-by-turn directions in Google Maps (or any maps app). */
+    fun navigate(ctx: Context, dest: String) {
+        val nav = Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=" + Uri.encode(dest) + "&mode=d")).setPackage(MAPS)
+        if (!ctx.tryStart(nav)) ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(dest))), "No maps app found")
+    }
+
+    /** Open Google Translate with [text] filled in. */
+    fun translate(ctx: Context, text: String) {
+        val viaProcess = Intent(Intent.ACTION_PROCESS_TEXT).setType("text/plain")
+            .putExtra(Intent.EXTRA_PROCESS_TEXT, text).putExtra(Intent.EXTRA_PROCESS_TEXT_READONLY, true).setPackage(TRANSLATE)
+        if (ctx.tryStart(viaProcess)) return
+        val viaShare = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text).setPackage(TRANSLATE)
+        if (ctx.tryStart(viaShare)) return
+        ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("https://translate.google.com/?sl=auto&tl=pl&text=" + Uri.encode(text))))
+    }
+
     fun homeSettings(ctx: Context) {
         if (!ctx.tryStart(Intent(Settings.ACTION_HOME_SETTINGS))) ctx.tryStart(Intent(Settings.ACTION_SETTINGS))
     }

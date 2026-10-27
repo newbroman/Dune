@@ -11,6 +11,19 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 - Tap a task to tick it, long-press to delete. Tap a notification to open it, long-press to dismiss that app's.
 - Tap the clock for alarms, the date for the calendar, the weather to refresh, the L14 status to recheck.
 
+## Home screen extras
+- **Polish clock** – the date in Polish and the time in words (*osiemnasta czterdzieści jeden*). Tap to hear it.
+- **Phrase of the day** – from Polish Phrase Master; tap to hear it, *another* for a different one, long-press to open the app.
+- **Ask Dune** – type or tap 🎤: "navigate to…", "set an alarm for 7:30", "5 minute timer", "add task…",
+  "how do you say … in Polish", "play … on Spotify", "open …". Anything else offers Claude, Gemini, Google or Translate.
+- **Widgets** – "+ add a widget" puts any app's widget (Google Translate, Weawow, Maps…) on the home screen.
+
+## Drive mode
+Opens when the phone connects to your car's Bluetooth (Settings › Drive mode › choose your car), or tap *drive*.
+Big buttons for Home, Navigate…, Spotify, BBC Sounds, Spheres and Messages; play/pause/skip for whatever is playing;
+new messages are read aloud; *Reply* takes your answer by voice, reads it back and sends it after a few seconds unless
+you cancel. The 🎤 Speak button takes any command above plus "read my messages", "reply …", "pause", "skip".
+
 ## Phone setup
 1. Install the APK (from Releases, or over USB with `adb install -r Dune.apk`) (allow "install unknown apps" for your file manager/browser when asked).
 2. Open Dune › tap "Make Dune your home app" › pick Dune.
