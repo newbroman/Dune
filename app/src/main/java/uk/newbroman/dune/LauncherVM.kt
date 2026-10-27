@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.UserHandle
 import android.os.UserManager
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -26,33 +27,63 @@ import kotlinx.coroutines.withContext
 
 data class AppEntry(
     val label: String, val pkg: String, val cls: String, val user: UserHandle, val serial: Long,
-    val category: Int, val info: LauncherActivityInfo,
+    val category: Int, val info: LauncherActivityInfo, val webUrl: String? = null,
 ) {
     val key get() = "$pkg/$cls/$serial"
 }
 
 enum class Screen { HOME, DRAWER, SETTINGS, GROUP }
 
-val DEFAULT_GROUPS = listOf("Comms", "Work", "Media", "Travel", "News", "Games", "Tools")
+/** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
+val DEFAULT_GROUP_RULES = """
+Languages | polish, polski, welsh, cymraeg, diarhebion, german, deutsch, vietnam, norwegian, norsk, nynorsk, bokmål, language, duolingo, babbel, memrise, anki, busuu, lingo, phrase, proverb, przysłow, translate, dictionary, słownik
+My apps | @web:newbroman.github.io, uk.newbroman, newbroman, spheres, source check, flight checker, newborough
+AI | gemini, claude, chatgpt, copilot, perplexity, grok, deepseek, meta ai, le chat, mistral
+Web | com.android.chrome, chrome, firefox, =google, browser, duckduckgo, brave, opera, microsoft edge, =edge, kiwi, vivaldi, ecosia, startpage
+Shopping | toolstation, screwfix, costa, greggs, gail's, gails, asda, tesco, sainsbury, nectar, clubcard, lidl, aldi, morrisons, co-op, iceland, waitrose, ocado, m&s, boots, superdrug, amazon, ebay, argos, b&q, wickes, homebase, currys, ikea, halfords, travis perkins, jewson, city plumbing, machine mart, robert dyas, primark, vinted, temu, shein, aliexpress, etsy, mcdonald, starbucks, caffè nero, caffe nero, pret a, subway, kfc, domino, just eat, deliveroo, uber eats, wetherspoon, shell, bpme, esso, tim hortons, pets at home, holland & barrett, loyalty, rewards
+Comms | phone, dialer, contacts, messag, sms, mail, gmail, outlook, whatsapp, telegram, signal, messenger, zoom, teams, slack, discord, meet, skype, @cat:social
+Work | termux, termius, tailscale, docs, sheets, slides, drive, office, =word, excel, keep, notion, calendar, github, pdf, scanner, calculator, tasks, @cat:productivity
+Media | camera, gallery, photos, music, spotify, youtube, video, podcast, radio, player, iplayer, netflix, prime video, sounds, @cat:audio, @cat:video, @cat:image
+Travel | maps, transit, train, rail, uber, bolt, flight, booking, waze, citymapper, ryanair, easyjet, @cat:maps
+News | news, bbc, guardian, weather, @cat:news
+Games | @cat:game, game
+Tools |
+""".trim()
 
-/** First guess at a group, from Android's app category plus name keywords. */
-fun autoGroup(a: AppEntry): String {
-    val p = a.pkg.lowercase(); val l = a.label.lowercase()
-    fun has(vararg k: String) = k.any { p.contains(it) || l.contains(it) }
-    return when {
-        has("termux", "termius", "claude", "docs", "sheets", "slides", "drive", "office", "word", "excel",
-            "keep", "notion", "calendar", "github", "pdf", "scanner", "calculator", "tasks") -> "Work"
-        has("dialer", "phone", "contacts", "messag", "mms", "sms", "mail", "whatsapp", "telegram", "signal",
-            "zoom", "teams", "slack", "discord", "meet") -> "Comms"
-        a.category == ApplicationInfo.CATEGORY_SOCIAL -> "Comms"
-        a.category == ApplicationInfo.CATEGORY_GAME -> "Games"
-        a.category == ApplicationInfo.CATEGORY_PRODUCTIVITY -> "Work"
-        a.category == ApplicationInfo.CATEGORY_MAPS ||
-            has("maps", "transit", "train", "rail", "uber", "bolt", "flight", "booking", "waze", "citymapper") -> "Travel"
-        a.category in listOf(ApplicationInfo.CATEGORY_AUDIO, ApplicationInfo.CATEGORY_VIDEO, ApplicationInfo.CATEGORY_IMAGE) ||
-            has("camera", "gallery", "photo", "music", "spotify", "youtube", "video", "podcast", "radio", "player", "iplayer", "netflix") -> "Media"
-        a.category == ApplicationInfo.CATEGORY_NEWS || has("news", "bbc", "guardian", "weather") -> "News"
-        else -> "Tools"
+private val CATEGORIES = mapOf(
+    "game" to ApplicationInfo.CATEGORY_GAME, "audio" to ApplicationInfo.CATEGORY_AUDIO,
+    "video" to ApplicationInfo.CATEGORY_VIDEO, "image" to ApplicationInfo.CATEGORY_IMAGE,
+    "social" to ApplicationInfo.CATEGORY_SOCIAL, "news" to ApplicationInfo.CATEGORY_NEWS,
+    "maps" to ApplicationInfo.CATEGORY_MAPS, "productivity" to ApplicationInfo.CATEGORY_PRODUCTIVITY,
+)
+
+/** What group rules look at. */
+data class AppFacts(val label: String, val pkg: String, val category: Int = -1, val webUrl: String? = null)
+val AppEntry.facts get() = AppFacts(label, pkg, category, webUrl)
+
+class GroupRule(val name: String, private val tests: List<(AppFacts) -> Boolean>) {
+    fun matches(a: AppFacts) = tests.any { it(a) }
+}
+
+fun parseGroupRules(text: String): List<GroupRule> = text.lines().map { it.trim() }
+    .filter { it.isNotEmpty() && !it.startsWith("#") }
+    .mapNotNull { line ->
+        val name = line.substringBefore('|').trim().ifEmpty { return@mapNotNull null }
+        val kws = if ('|' in line) line.substringAfter('|').split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() } else emptyList()
+        GroupRule(name, kws.map { k -> keywordTest(k) })
+    }
+    .distinctBy { it.name.lowercase() }
+
+private fun keywordTest(k: String): (AppFacts) -> Boolean = when {
+    k.startsWith("@web:") -> { a -> a.webUrl?.lowercase()?.contains(k.removePrefix("@web:")) == true }
+    k.startsWith("@cat:") -> { val c = CATEGORIES[k.removePrefix("@cat:")]; { a -> c != null && a.category == c } }
+    k.startsWith("=") -> { a -> a.label.lowercase() == k.substring(1) }
+    '.' in k && ' ' !in k -> { a -> a.pkg == k || a.pkg.startsWith("$k.") }
+    else -> {
+        // label word starting with the keyword; long keywords also match inside package names
+        val re = Regex("(^|[^\\p{L}0-9])" + Regex.escape(k))
+        val inPkg = k.length >= 5 && ' ' !in k;
+        { a -> re.containsMatchIn(a.label.lowercase()) || (inPkg && a.pkg.contains(k)) }
     }
 }
 
@@ -108,9 +139,15 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
                 um.userProfiles.flatMap { u ->
                     val serial = um.getSerialNumberForUser(u)
                     la.getActivityList(null, u).map {
+                        val pkg = it.componentName.packageName
+                        // Installed web apps (WebAPKs) record the site they open: used for "@web:" rules.
+                        val web = if (pkg.startsWith("org.chromium.webapk")) runCatching {
+                            ctx.packageManager.getApplicationInfo(pkg, android.content.pm.PackageManager.GET_META_DATA)
+                                .metaData?.getString("org.chromium.webapk.shell_apk.startUrl")
+                        }.getOrNull() else null
                         AppEntry(
-                            it.label.toString(), it.componentName.packageName, it.componentName.className, u, serial,
-                            it.applicationInfo.category, it,
+                            it.label.toString(), pkg, it.componentName.className, u, serial,
+                            it.applicationInfo.category, it, web,
                         )
                     }
                 }.filter { it.pkg != ctx.packageName }
@@ -126,8 +163,21 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** App whose "move to group" picker is showing. */
     var moving by mutableStateOf<AppEntry?>(null)
 
-    val groupNames: List<String> get() = DEFAULT_GROUPS + store.customGroups
-    fun groupOf(a: AppEntry) = store.groupOverrides[a.key]?.takeIf { it in groupNames } ?: autoGroup(a)
+    private val rules by derivedStateOf { parseGroupRules(store.groupRules.value) }
+    val groupNames: List<String> by derivedStateOf {
+        val names = rules.map { it.name }
+        names + store.customGroups.filter { c -> names.none { it.equals(c, true) } }
+    }
+    /** Every app's group, recomputed only when apps, rules or manual moves change. */
+    private val groupMap by derivedStateOf {
+        val names = groupNames
+        val fallback = names.firstOrNull { it.equals("Tools", true) } ?: names.lastOrNull() ?: "Apps"
+        apps.associate { a ->
+            a.key to (store.groupOverrides[a.key]?.takeIf { it in names }
+                ?: rules.firstOrNull { it.matches(a.facts) }?.name ?: fallback)
+        }
+    }
+    fun groupOf(a: AppEntry) = groupMap[a.key] ?: "Tools"
     fun appsIn(g: String) = apps.filter { it.key !in store.hidden && groupOf(it) == g }
 
     fun showGroup(g: String) { openGroup = g; screen = Screen.GROUP }

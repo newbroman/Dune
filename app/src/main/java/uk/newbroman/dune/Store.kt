@@ -74,6 +74,7 @@ class Store private constructor(ctx: Context) {
     val showL14 = Flag("showL14", true)
     val showGroups = Flag("showGroups", true)
     val showSky = Flag("showSky", true)
+    val groupRules = Str("groupRules", DEFAULT_GROUP_RULES)
 
     // Groups: user-made group names, and per-app group choices (app key -> group)
     var customGroups by mutableStateOf(readList("customGroups"))

@@ -21,6 +21,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -598,7 +601,11 @@ fun SettingsScreen(vm: LauncherVM) {
 
         item { Header("Groups") }
         item {
-            Note("Apps are sorted automatically; long-press any app › Move to group to change it.")
+            Note("Apps are sorted automatically; long-press any app › Move to group to change one. " +
+                "Rules, one group per line:  Name | keywords. First match wins. Keywords match the start of a word in the app's name; " +
+                "=name matches exactly; a.b.c is a package; @web:site matches installed web apps; @cat:game uses Android's category.")
+            Field("Group rules", s.groupRules, multi = true)
+            LinkRow("Restore the suggested rules") { s.groupRules.set(DEFAULT_GROUP_RULES) }
             LinkRow("Put every app back in its automatic group") { s.resetGroups(); act.toast("Groups reset") }
         }
 
@@ -608,7 +615,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.5", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.6", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -707,6 +714,20 @@ fun GroupScreen(vm: LauncherVM) {
             "←  $name", color = Fg, fontSize = 22.sp,
             modifier = Modifier.combinedClickable { vm.goHome() }.padding(start = 8.dp, top = 20.dp, bottom = 16.dp)
         )
+        if (name.equals("Web", true)) {
+            val ctx = LocalContext.current
+            var q by rememberSaveable { mutableStateOf("") }
+            BasicTextField(
+                value = q, onValueChange = { q = it },
+                textStyle = TextStyle(color = Fg, fontSize = 20.sp), cursorBrush = SolidColor(Sand), singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { if (q.isNotBlank()) { Actions.webSearch(ctx, q.trim()); q = "" } }),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+                    .border(1.dp, Faint, RoundedCornerShape(22.dp)).padding(horizontal = 18.dp, vertical = 12.dp),
+                decorationBox = { inner -> Box { if (q.isEmpty()) Text("Search the web", color = Faint, fontSize = 20.sp); inner() } },
+            )
+            Spacer(Modifier.height(12.dp))
+        }
         if (list.isEmpty()) Text("No apps here yet", color = Dim, modifier = Modifier.padding(8.dp))
         LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).nestedScroll(gestures)) {
             gridItems(list, key = { it.key }) { a -> GridApp(vm, a) }
@@ -758,7 +779,7 @@ private fun MoveDialog(vm: LauncherVM, a: AppEntry) {
         onDismissRequest = done,
         title = { Text("Move ${a.label} to") },
         text = {
-            Column {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
                 vm.groupNames.forEach { g ->
                     Text(
                         if (g == current) "●  $g" else "○  $g",
