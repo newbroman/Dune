@@ -615,7 +615,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.6", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.7", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -664,7 +664,8 @@ fun AppIcon(vm: LauncherVM, a: AppEntry, size: Dp) {
 
 @Composable
 private fun GroupsBlock(vm: LauncherVM) {
-    val groups = vm.groupNames.map { it to vm.appsIn(it) }.filter { it.second.isNotEmpty() }
+    val groups = vm.groupNames.map { it to vm.appsIn(it) }
+        .filter { (n, l) -> l.isNotEmpty() || n.equals("Links", true) }
     if (groups.isEmpty()) return
     Header("Groups")
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -687,6 +688,12 @@ private fun GroupTile(vm: LauncherVM, name: String, list: List<AppEntry>) {
                 Modifier.size(60.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFF1C1A17)).padding(7.dp)
             ) {
                 Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
+                    if (name.equals("Links", true) && list.isEmpty()) vm.linkPinned.take(4).chunked(2).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            row.forEach { LinkIcon(vm, it, 21.dp) }
+                            if (row.size == 1) Spacer(Modifier.size(21.dp))
+                        }
+                    }
                     list.take(4).chunked(2).forEach { row ->
                         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                             row.forEach { AppIcon(vm, it, 21.dp) }
@@ -729,7 +736,13 @@ fun GroupScreen(vm: LauncherVM) {
             Spacer(Modifier.height(12.dp))
         }
         if (list.isEmpty()) Text("No apps here yet", color = Dim, modifier = Modifier.padding(8.dp))
+        val isLinks = name.equals("Links", true)
+        if (isLinks) Text(
+            "To add a page: open it in Chrome › ⋮ › Add to home screen. Long-press a link to remove it.",
+            color = Dim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+        )
         LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).nestedScroll(gestures)) {
+            if (isLinks) gridItems(vm.linkPinned, key = { "l" + it.pkg + it.id }) { p -> GridLink(vm, p) }
             gridItems(list, key = { it.key }) { a -> GridApp(vm, a) }
         }
     }
@@ -807,4 +820,34 @@ private fun MoveDialog(vm: LauncherVM, a: AppEntry) {
             }) { Text(if (newName.isNotBlank()) "Create" else "Close") }
         },
     )
+}
+
+@Composable
+fun LinkIcon(vm: LauncherVM, p: Pinned, size: Dp) {
+    val bmp = vm.shortcutIcon(p)
+    if (bmp != null) Image(bmp, contentDescription = null, modifier = Modifier.size(size).clip(CircleShape))
+    else Box(Modifier.size(size).clip(CircleShape).background(Faint), contentAlignment = Alignment.Center) {
+        Text(p.label.take(1).uppercase(), color = Fg, fontSize = (size.value * 0.45f).sp)
+    }
+}
+
+@Composable
+private fun GridLink(vm: LauncherVM, p: Pinned) {
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Column(
+            Modifier.fillMaxWidth().combinedClickable(onLongClick = { menu = true }, onClick = { vm.launchPinned(p) })
+                .padding(vertical = 12.dp, horizontal = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            LinkIcon(vm, p, 52.dp)
+            Text(
+                p.label, color = Fg, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)
+            )
+        }
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            DropdownMenuItem(text = { Text("Remove link") }, onClick = { menu = false; vm.store.removePinned(p) })
+        }
+    }
 }

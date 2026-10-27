@@ -40,10 +40,15 @@ Languages | polish, polski, welsh, cymraeg, diarhebion, german, deutsch, vietnam
 My apps | @web:newbroman.github.io, uk.newbroman, newbroman, spheres, source check, flight checker, newborough
 AI | gemini, claude, chatgpt, copilot, perplexity, grok, deepseek, meta ai, le chat, mistral
 Web | com.android.chrome, chrome, firefox, =google, browser, duckduckgo, brave, opera, microsoft edge, =edge, kiwi, vivaldi, ecosia, startpage
+Links |
+Music | music, spotify, radio, podcast, sounds, shazam, soundcloud, tunein, deezer, tidal, bandcamp, audible, tuner, metronome, piano, guitar, synth, @cat:audio
+Stars & Geography | stellarium, star walk, starwalk, skyview, sky map, sky guide, night sky, skysafari, planet, astronom, astro, nasa, space, moon, aurora, heavens-above, iss, earth, atlas, globe, geograph, geolog, os maps, ordnance, what3words, geocach, peakfinder, peakvisor, tide
+Files | files, file manager, documentsui, explorer, solid explorer, mixplorer, total commander, zarchiver, rar, cx file
+Comms | phone, dialer, contacts, messag, sms, mail, outlook, whatsapp, telegram, signal, messenger, zoom, teams, slack, discord, meet, skype, @cat:social
+Google | com.google., =youtube, youtube
 Shopping | toolstation, screwfix, costa, greggs, gail's, gails, asda, tesco, sainsbury, nectar, clubcard, lidl, aldi, morrisons, co-op, iceland, waitrose, ocado, m&s, boots, superdrug, amazon, ebay, argos, b&q, wickes, homebase, currys, ikea, halfords, travis perkins, jewson, city plumbing, machine mart, robert dyas, primark, vinted, temu, shein, aliexpress, etsy, mcdonald, starbucks, caffè nero, caffe nero, pret a, subway, kfc, domino, just eat, deliveroo, uber eats, wetherspoon, shell, bpme, esso, tim hortons, pets at home, holland & barrett, loyalty, rewards
-Comms | phone, dialer, contacts, messag, sms, mail, gmail, outlook, whatsapp, telegram, signal, messenger, zoom, teams, slack, discord, meet, skype, @cat:social
 Work | termux, termius, tailscale, docs, sheets, slides, drive, office, =word, excel, keep, notion, calendar, github, pdf, scanner, calculator, tasks, @cat:productivity
-Media | camera, gallery, photos, music, spotify, youtube, video, podcast, radio, player, iplayer, netflix, prime video, sounds, @cat:audio, @cat:video, @cat:image
+Media | camera, gallery, photos, video, player, iplayer, netflix, prime video, @cat:video, @cat:image
 Travel | maps, transit, train, rail, uber, bolt, flight, booking, waze, citymapper, ryanair, easyjet, @cat:maps
 News | news, bbc, guardian, weather, @cat:news
 Games | @cat:game, game
@@ -78,6 +83,7 @@ private fun keywordTest(k: String): (AppFacts) -> Boolean = when {
     k.startsWith("@web:") -> { a -> a.webUrl?.lowercase()?.contains(k.removePrefix("@web:")) == true }
     k.startsWith("@cat:") -> { val c = CATEGORIES[k.removePrefix("@cat:")]; { a -> c != null && a.category == c } }
     k.startsWith("=") -> { a -> a.label.lowercase() == k.substring(1) }
+    k.endsWith(".") && ' ' !in k -> { a -> a.pkg.startsWith(k) }
     '.' in k && ' ' !in k -> { a -> a.pkg == k || a.pkg.startsWith("$k.") }
     else -> {
         // label word starting with the keyword; long keywords also match inside package names
@@ -198,6 +204,29 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     }
 
     // ---------- shortcuts (Termux:Widget and other apps' long-press shortcuts)
+
+    /** Pinned web pages and other non-Termux shortcuts (Chrome › Add to home screen) – shown in Links. */
+    val linkPinned: List<Pinned> get() = store.pinned.filter { it.pkg != TERMUX && it.pkg != "com.termux.widget" }
+
+    fun shortcutIcon(p: Pinned): ImageBitmap? {
+        val k = "sc:${p.pkg}:${p.id}"
+        icons[k]?.let { return it }
+        if (iconLoading.add(k)) viewModelScope.launch {
+            val bmp = withContext(Dispatchers.Default) {
+                runCatching {
+                    val d = if (p.uri.isEmpty() && la.hasShortcutHostPermission()) {
+                        val q = LauncherApps.ShortcutQuery().setPackage(p.pkg).setShortcutIds(listOf(p.id))
+                            .setQueryFlags(LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED)
+                        la.getShortcuts(q, android.os.Process.myUserHandle())?.firstOrNull()
+                            ?.let { la.getShortcutIconDrawable(it, ctx.resources.displayMetrics.densityDpi) }
+                    } else null
+                    (d ?: ctx.packageManager.getApplicationIcon(p.pkg)).toBitmap(144, 144).asImageBitmap()
+                }.getOrNull()
+            }
+            if (bmp != null) icons[k] = bmp
+        }
+        return null
+    }
 
     val termuxPinned: List<Pinned> get() = store.pinned.filter { it.pkg == TERMUX || it.pkg == "com.termux.widget" }
     /** The Termux shortcut the L14 SSH button uses: one whose name mentions L14 or ssh. */
