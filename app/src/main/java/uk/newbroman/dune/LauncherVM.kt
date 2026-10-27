@@ -58,7 +58,7 @@ fun autoGroup(a: AppEntry): String {
 
 class LauncherVM(app: Application) : AndroidViewModel(app) {
     private val ctx get() = getApplication<Application>()
-    val store = Store(app)
+    val store = Store.get(app)
     private val la = app.getSystemService(LauncherApps::class.java)
     private val um = app.getSystemService(UserManager::class.java)
 
@@ -145,6 +145,57 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             if (bmp != null) icons[a.key] = bmp
         }
         return null
+    }
+
+    // ---------- shortcuts (Termux:Widget and other apps' long-press shortcuts)
+
+    val termuxPinned: List<Pinned> get() = store.pinned.filter { it.pkg == TERMUX || it.pkg == "com.termux.widget" }
+    /** The Termux shortcut the L14 SSH button uses: one whose name mentions L14 or ssh. */
+    val l14Shortcut: Pinned? get() = termuxPinned.firstOrNull {
+        it.label.contains("l14", true) || it.label.contains("ssh", true)
+    }
+
+    fun launchPinned(s: Pinned) {
+        try {
+            if (s.uri.isNotEmpty()) {
+                ctx.startActivity(android.content.Intent.parseUri(s.uri, 0).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            } else la.startShortcut(s.pkg, s.id, null, null, android.os.Process.myUserHandle())
+        } catch (e: Exception) { ctx.toast("Couldn't open ${s.label} – it may have been removed") }
+    }
+
+    fun appShortcuts(a: AppEntry): List<android.content.pm.ShortcutInfo> = try {
+        if (!la.hasShortcutHostPermission()) emptyList() else {
+            val q = LauncherApps.ShortcutQuery().setPackage(a.pkg).setQueryFlags(
+                LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+            )
+            (la.getShortcuts(q, a.user) ?: emptyList()).filter { it.isEnabled }.sortedBy { it.rank }.take(6)
+        }
+    } catch (e: Exception) { emptyList() }
+
+    fun launchShortcutInfo(s: android.content.pm.ShortcutInfo) {
+        try { la.startShortcut(s, null, null) } catch (e: Exception) { ctx.toast("Couldn't open that shortcut") }
+    }
+
+    /** Accept a pin request (from an app, or returned by its create-shortcut screen). */
+    fun acceptPin(intent: android.content.Intent?): Boolean {
+        if (intent == null) return false
+        val req = runCatching { la.getPinItemRequest(intent) }.getOrNull()
+        if (req != null && req.requestType == LauncherApps.PinItemRequest.REQUEST_TYPE_SHORTCUT) {
+            val info = req.shortcutInfo ?: return false
+            if (!req.isValid || !req.accept()) return false
+            store.addPinned(Pinned(info.`package`, info.id, (info.shortLabel ?: info.longLabel ?: info.id).toString()))
+            ctx.toast("Added “${info.shortLabel}” to Dune")
+            return true
+        }
+        // Old-style shortcut result
+        @Suppress("DEPRECATION")
+        val target = intent.getParcelableExtra<android.content.Intent>(android.content.Intent.EXTRA_SHORTCUT_INTENT) ?: return false
+        @Suppress("DEPRECATION")
+        val name = intent.getStringExtra(android.content.Intent.EXTRA_SHORTCUT_NAME) ?: "Shortcut"
+        store.addPinned(Pinned(target.`package` ?: target.component?.packageName ?: TERMUX, "legacy:" + name, name, target.toUri(0)))
+        ctx.toast("Added “$name” to Dune")
+        return true
     }
 
     fun appByKey(key: String) = apps.firstOrNull { it.key == key }

@@ -228,7 +228,8 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
       try {
         val m = model
         val cx = size.width / 2f; val cy = size.height * 0.46f
-        val r = maxOf(size.width, size.height) * 0.52f
+        // Whole sky dome fits the screen width, so every body above the horizon is on screen.
+        val r = minOf(size.width, size.height) * 0.47f
         fun pos(alt: Double, az: Double): Offset {
             val rr = ((90 - alt) / 90).toFloat() * r
             return Offset(cx - rr * sind(az).toFloat(), cy - rr * cosd(az).toFloat())
@@ -244,12 +245,20 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
             else -> day
         }
         drawRect(Brush.radialGradient(listOf(top, Color.Black), Offset(cx, cy), r * 1.1f))
-        val dayDim = when { sunAlt > 0 -> 0.35f; sunAlt > -6 -> 0.6f; else -> 1f }
+        val dayDim = when { sunAlt > 0 -> 0.55f; sunAlt > -6 -> 0.75f; else -> 1f }
         val a = strength * dayDim
         val t = frame / 1000.0
 
         // Horizon
         drawCircle(Color(0x22D9B26A), r, Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
+
+        // Compass points just inside the horizon
+        for ((label, az) in listOf("N" to 0.0, "E" to 90.0, "S" to 180.0, "W" to 270.0)) {
+            val lay = measurer.measure(label, labelStyle)
+            val p = pos(3.0, az) - Offset(lay.size.width / 2f, lay.size.height / 2f)
+            if (p.x >= 0 && p.y >= 0 && p.x + lay.size.width <= size.width && p.y + lay.size.height <= size.height)
+                drawText(lay, color = Color(0x55D9B26A), topLeft = p)
+        }
 
         // Constellation lines
         val byName = m.stars.associateBy { it.first.name }

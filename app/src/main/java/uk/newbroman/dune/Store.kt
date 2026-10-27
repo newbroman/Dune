@@ -22,8 +22,34 @@ fun parseShortcuts(text: String): List<Shortcut> = text.lines()
     .filter { it.label.isNotEmpty() }
 
 /** All settings and user data, persisted to SharedPreferences and observable by Compose. */
-class Store(ctx: Context) {
+/** A shortcut pinned to Dune: a real ShortcutInfo (pkg + id) or an old-style intent URI. */
+data class Pinned(val pkg: String, val id: String, val label: String, val uri: String = "")
+
+class Store private constructor(ctx: Context) {
+    companion object {
+        @Volatile private var instance: Store? = null
+        fun get(ctx: Context): Store = instance ?: synchronized(this) {
+            instance ?: Store(ctx.applicationContext).also { instance = it }
+        }
+    }
+
     private val p = ctx.getSharedPreferences("dune", Context.MODE_PRIVATE)
+
+    var pinned by mutableStateOf(readPinned())
+        private set
+    fun addPinned(s: Pinned) = savePinned(pinned.filterNot { it.pkg == s.pkg && it.id == s.id } + s)
+    fun removePinned(s: Pinned) = savePinned(pinned - s)
+    private fun savePinned(l: List<Pinned>) {
+        pinned = l
+        val a = JSONArray()
+        l.forEach { a.put(JSONObject().put("pkg", it.pkg).put("id", it.id).put("label", it.label).put("uri", it.uri)) }
+        p.edit().putString("pinned", a.toString()).apply()
+    }
+    private fun readPinned(): List<Pinned> = try {
+        val a = JSONArray(p.getString("pinned", "[]"))
+        (0 until a.length()).map { a.getJSONObject(it) }
+            .map { Pinned(it.getString("pkg"), it.getString("id"), it.getString("label"), it.optString("uri")) }
+    } catch (e: Exception) { emptyList() }
 
     inner class Str(private val key: String, def: String) {
         var value by mutableStateOf(p.getString(key, def) ?: def)

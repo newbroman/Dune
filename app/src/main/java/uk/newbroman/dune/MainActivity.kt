@@ -19,6 +19,23 @@ class MainActivity : ComponentActivity() {
         permCallback?.invoke(it); permCallback = null
     }
 
+    private val shortcutLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        if (it.resultCode == RESULT_OK && !vm.acceptPin(it.data)) toast("That shortcut couldn't be added")
+    }
+
+    /** Open an app's "create shortcut" screen (Termux lists your ~/.shortcuts scripts there). */
+    fun addShortcutFrom(vararg pkgs: String) {
+        for (pkg in pkgs) {
+            val list = packageManager.queryIntentActivities(Intent(Intent.ACTION_CREATE_SHORTCUT).setPackage(pkg), 0)
+            val ai = list.firstOrNull()?.activityInfo ?: continue
+            try {
+                shortcutLauncher.launch(Intent(Intent.ACTION_CREATE_SHORTCUT).setClassName(ai.packageName, ai.name))
+                return
+            } catch (e: Exception) { }
+        }
+        toast("Termux has no shortcut screen – add the widget from Termux instead")
+    }
+
     fun requestPerm(permission: String, cb: (Boolean) -> Unit) {
         permCallback = cb
         permLauncher.launch(permission)

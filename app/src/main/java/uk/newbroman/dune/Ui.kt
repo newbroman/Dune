@@ -400,9 +400,13 @@ private fun FavouritesBlock(vm: LauncherVM) {
 private fun TermuxBlock(vm: LauncherVM) {
     val act = LocalContext.current as Activity
     val shortcuts = parseShortcuts(vm.store.termuxLines.value)
+    val pinned = vm.termuxPinned
     Header("Termux", "edit") { vm.screen = Screen.SETTINGS }
-    if (shortcuts.isEmpty()) { Text("Add shortcuts in settings", color = Faint, fontSize = 15.sp); return }
-    FlowRow { shortcuts.forEach { sc -> Chip(sc.label) { Actions.termux(act, sc.command) } } }
+    FlowRow {
+        pinned.forEach { p -> Chip("▸ " + p.label, onLong = { vm.store.removePinned(p) }) { vm.launchPinned(p) } }
+        shortcuts.forEach { sc -> Chip(sc.label) { Actions.termux(act, sc.command) } }
+        Chip("+") { (act as MainActivity).addShortcutFrom(TERMUX, "com.termux.widget") }
+    }
 }
 
 @Composable
@@ -426,7 +430,8 @@ private fun L14Block(vm: LauncherVM) {
     }
     val hasTermius = remember(vm.resumeTick) { act.isInstalled(TERMIUS) }
     FlowRow {
-        Chip("SSH") { Actions.termux(act, Actions.sshCommand(s)) }
+        val sc = vm.l14Shortcut
+        Chip("SSH") { if (sc != null) vm.launchPinned(sc) else Actions.termux(act, Actions.sshCommand(s)) }
         if (hasTermius) Chip("Termius") { act.launchPackage(TERMIUS) }
         if (s.l14Mac.value.isNotBlank()) Chip("Wake") { vm.wakeL14() }
         parseShortcuts(s.l14Lines.value).forEach { sc ->
@@ -506,6 +511,9 @@ private fun AppRow(vm: LauncherVM, a: AppEntry) {
             DropdownMenuItem(
                 text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
                 onClick = { menu = false; s.toggleFavourite(a.key) })
+            vm.appShortcuts(a).forEach { sc ->
+                DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
+            }
             DropdownMenuItem(text = { Text("Move to group…  (${vm.groupOf(a)})") }, onClick = { menu = false; vm.moving = a })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
@@ -572,7 +580,9 @@ fun SettingsScreen(vm: LauncherVM) {
 
         item { Header("Termux shortcuts") }
         item {
-            Note("One per line:  Label | command.  A blank command just opens Termux.")
+            Note("One-tap: put a script in Termux's ~/.shortcuts, then tap “+” in the Termux row and pick it. " +
+                "A shortcut named L14 (or ssh…) is used by the L14 SSH button. Long-press a ▸ chip to remove it.")
+            Note("Fallback lines (copied for you to paste):  Label | command")
             Field("Shortcuts", s.termuxLines, multi = true)
         }
 
@@ -598,7 +608,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.4.1", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.5", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -723,6 +733,9 @@ private fun GridApp(vm: LauncherVM, a: AppEntry) {
             )
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            if (menu) vm.appShortcuts(a).forEach { sc ->
+                DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
+            }
             DropdownMenuItem(text = { Text("Move to group…") }, onClick = { menu = false; vm.moving = a })
             DropdownMenuItem(
                 text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
