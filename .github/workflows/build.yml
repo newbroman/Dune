@@ -41,7 +41,7 @@ jobs:
           fi
       - run: chmod +x gradlew && ./gradlew testReleaseUnitTest assembleRelease --no-daemon
       - run: cp app/build/outputs/apk/release/app-release*.apk Dune.apk
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: Dune-apk
           path: Dune.apk

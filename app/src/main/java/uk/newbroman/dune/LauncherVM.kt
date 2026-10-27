@@ -138,6 +138,34 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** A request Dune couldn't handle itself: offer Claude / Gemini / Google. */
     var assistantFallback by mutableStateOf<String?>(null)
     var pendingReply by mutableStateOf<PendingReply?>(null)
+
+    // ---------- Coinbase
+    var coinbaseKey by mutableStateOf(Coinbase.load(app))
+        private set
+    var portfolio by mutableStateOf<Portfolio?>(null)
+        private set
+    var coinbaseMsg by mutableStateOf<String?>(null)
+        private set
+    private var cbJob: kotlinx.coroutines.Job? = null
+
+    fun saveCoinbaseKey(k: Coinbase.ApiKey?) {
+        Coinbase.save(ctx, k); coinbaseKey = k; portfolio = null; coinbaseMsg = null
+        if (k != null) refreshCoinbase(true)
+    }
+
+    fun refreshCoinbase(force: Boolean = false) {
+        val k = coinbaseKey ?: return
+        if (!store.showCoinbase.value) return
+        val p = portfolio
+        if (!force && p != null && System.currentTimeMillis() - p.at < 10 * 60_000L) return
+        cbJob?.cancel()
+        cbJob = viewModelScope.launch {
+            if (portfolio == null) coinbaseMsg = "Loading Coinbase…"
+            try { portfolio = Coinbase.fetch(k); coinbaseMsg = null }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { coinbaseMsg = e.message ?: "Couldn't reach Coinbase" }
+        }
+    }
     val media = MediaWatcher(app)
 
     private var phrases by mutableStateOf<List<Phrase>>(emptyList())
@@ -332,6 +360,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     fun onResume() {
         resumeTick++
+        refreshCoinbase()
         refreshWeather()
         checkL14()
     }

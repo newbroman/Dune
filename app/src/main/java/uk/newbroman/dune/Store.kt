@@ -81,6 +81,8 @@ class Store private constructor(ctx: Context) {
     val showPhrase = Flag("showPhrase", true)
     val showAssistant = Flag("showAssistant", true)
     val showWidgets = Flag("showWidgets", true)
+    val showCoinbase = Flag("showCoinbase", true)
+    val hideBalances = Flag("hideBalances", false)
 
     // Drive mode
     val driveAuto = Flag("driveAuto", true)

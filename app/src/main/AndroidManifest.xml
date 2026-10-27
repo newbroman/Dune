@@ -48,6 +48,7 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="spotify" />
         </intent>
+        <package android:name="com.coinbase.android" />
         <package android:name="com.spotify.music" />
         <package android:name="com.bbc.sounds" />
         <package android:name="com.google.android.apps.maps" />

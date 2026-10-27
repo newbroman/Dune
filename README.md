@@ -16,6 +16,8 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 - **Phrase of the day** – from Polish Phrase Master; tap to hear it, *another* for a different one, long-press to open the app.
 - **Ask Dune** – type or tap 🎤: "navigate to…", "set an alarm for 7:30", "5 minute timer", "add task…",
   "how do you say … in Polish", "play … on Spotify", "open …". Anything else offers Claude, Gemini, Google or Translate.
+- **Coinbase** – your holdings and total in pounds, from a *view-only* Coinbase API key (ECDSA) stored encrypted
+  on the phone. Tap to open Coinbase, long-press to refresh, *hide* to mask the figures.
 - **Widgets** – "+ add a widget" puts any app's widget (Google Translate, Weawow, Maps…) on the home screen.
 
 ## Drive mode

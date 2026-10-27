@@ -124,6 +124,16 @@ class MainActivity : ComponentActivity() {
 
     companion object { private const val REQ_CONFIGURE = 9001 }
 
+    /** Pick the downloaded Coinbase key file (cdp_api_key.json). */
+    private val keyFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val text = runCatching { contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } }.getOrNull()
+        val key = text?.let { Coinbase.parseKey("", it) }
+        if (key == null) toast("That file doesn't look like a Coinbase API key")
+        else { vm.saveCoinbaseKey(key); toast("Coinbase key saved") }
+    }
+    fun pickCoinbaseKeyFile() = keyFileLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"))
+
     fun requestPerm(permission: String, cb: (Boolean) -> Unit) {
         permCallback = cb
         permLauncher.launch(permission)

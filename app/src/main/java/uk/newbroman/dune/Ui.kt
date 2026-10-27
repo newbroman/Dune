@@ -171,6 +171,7 @@ fun HomeScreen(vm: LauncherVM) {
             if (s.showPhrase.value) item { PhraseBlock(vm) }
             if (s.showWeather.value) item { WeatherBlock(vm) }
             if (s.showWidgets.value) item { WidgetsBlock(vm) }
+            if (s.showCoinbase.value && vm.coinbaseKey != null) item { CoinbaseBlock(vm) }
             if (s.showNotifs.value) item { NotificationsBlock(vm) }
             if (s.showTasks.value) item { TasksBlock(s) }
             if (s.showGroups.value) item { GroupsBlock(vm) }
@@ -654,6 +655,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Ask bar (assistant)", s.showAssistant) }
         item { Toggle("Polish phrase of the day", s.showPhrase) }
         item { Toggle("Widgets", s.showWidgets) }
+        item { Toggle("Coinbase holdings", s.showCoinbase) }
         item { Toggle("Weather", s.showWeather) }
         item { Toggle("Notifications", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
@@ -663,6 +665,9 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Termux shortcuts", s.showTermux) }
         item { Toggle("L14", s.showL14) }
         item { Toggle("Open keyboard with app list", s.autoKeyboard) }
+
+        item { Header("Coinbase") }
+        item { CoinbaseSettings(vm) }
 
         item { Header("Drive mode") }
         item {
@@ -712,7 +717,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.8", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.9", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -977,5 +982,66 @@ private fun CarPicker(vm: LauncherVM) {
             (if (on) "☑  " else "☐  ") + name, color = if (on) Sand else Fg, fontSize = 17.sp,
             modifier = Modifier.fillMaxWidth().combinedClickable { s.setCar(addr, !on) }.padding(vertical = 8.dp)
         )
+    }
+}
+
+private fun money(v: Double) = "£" + String.format(java.util.Locale.UK, "%,.2f", v)
+private fun amount(v: Double) = when {
+    v >= 1000 -> String.format(java.util.Locale.UK, "%,.0f", v)
+    v >= 1 -> String.format(java.util.Locale.UK, "%,.4f", v).trimEnd('0').trimEnd('.')
+    else -> String.format(java.util.Locale.UK, "%.8f", v).trimEnd('0').trimEnd('.')
+}
+
+@Composable
+private fun CoinbaseBlock(vm: LauncherVM) {
+    val ctx = LocalContext.current
+    val s = vm.store
+    val p = vm.portfolio
+    val hidden = s.hideBalances.value
+    Header("Coinbase", if (hidden) "show" else "hide") { s.hideBalances.set(!hidden) }
+    Column(Modifier.fillMaxWidth().combinedClickable(
+        onLongClick = { vm.refreshCoinbase(true) },
+        onClick = { if (!ctx.launchPackage("com.coinbase.android")) ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.coinbase.com/home"))) },
+    )) {
+        if (p != null) {
+            Text(if (hidden) "£ • • • • •" else money(p.totalGbp), color = Sand, fontSize = 30.sp, fontWeight = FontWeight.Light)
+            if (!hidden) p.holdings.filter { (it.valueGbp ?: 0.0) >= 0.01 || it.valueGbp == null }.take(6).forEach { h ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Text(h.currency, color = Fg, fontSize = 16.sp, modifier = Modifier.width(64.dp))
+                    Text(amount(h.amount), color = Dim, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    Text(h.valueGbp?.let { money(it) } ?: "–", color = Fg, fontSize = 15.sp)
+                }
+            }
+            val mins = ((System.currentTimeMillis() - p.at) / 60_000).toInt()
+            Text(if (mins < 1) "updated just now · long-press to refresh" else "updated $mins min ago · long-press to refresh",
+                color = Faint, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+        }
+        vm.coinbaseMsg?.let { Text(it, color = Dim, fontSize = 14.sp) }
+    }
+}
+
+@Composable
+private fun CoinbaseSettings(vm: LauncherVM) {
+    val act = LocalContext.current as MainActivity
+    if (vm.coinbaseKey != null) {
+        Note("Connected with key …" + vm.coinbaseKey!!.name.takeLast(8) + ". Balances refresh every 10 minutes.")
+        LinkRow("Refresh now") { vm.refreshCoinbase(true) }
+        LinkRow("Remove the Coinbase key") { vm.saveCoinbaseKey(null); act.toast("Coinbase key removed") }
+        return
+    }
+    var name by rememberSaveable { mutableStateOf("") }
+    var secret by rememberSaveable { mutableStateOf("") }
+    Note("Create a key at portal.cdp.coinbase.com › API keys › Secret API keys: tick View only (no Trade, no Transfer), " +
+        "choose ECDSA as the signature algorithm, then download the key file. Dune keeps it encrypted on this phone.")
+    LinkRow("Load the downloaded key file") { act.pickCoinbaseKeyFile() }
+    Note("…or paste the key name and private key:")
+    OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Key name (organizations/…/apiKeys/…)") },
+        singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+    OutlinedTextField(value = secret, onValueChange = { secret = it }, label = { Text("Private key (-----BEGIN EC PRIVATE KEY-----…)") },
+        minLines = 3, modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp))
+    LinkRow("Save and connect") {
+        val k = Coinbase.parseKey(name, secret)
+        if (k == null) act.toast("Paste both the key name and the private key")
+        else { vm.saveCoinbaseKey(k); name = ""; secret = "" }
     }
 }
