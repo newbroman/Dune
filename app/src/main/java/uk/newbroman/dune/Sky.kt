@@ -225,6 +225,7 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
     val labelStyle = TextStyle(color = Color(0x99D9B26A), fontSize = 10.sp)
 
     Canvas(modifier) {
+      try {
         val m = model
         val cx = size.width / 2f; val cy = size.height * 0.46f
         val r = maxOf(size.width, size.height) * 0.52f
@@ -285,8 +286,17 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
                     drawCircle(b.color.copy(alpha = 0.95f * a), b.size, p)
                 }
             }
-            if (b.name != "Sun") drawText(measurer, b.name, p + Offset(12f, -8f), labelStyle.copy(color = labelStyle.color.copy(alpha = 0.6f * a)))
+            if (b.name != "Sun") {
+                // Only label bodies on screen; drawText throws if the text starts beyond the edge.
+                val layout = measurer.measure(b.name, labelStyle)
+                val tl = p + Offset(12f, -8f)
+                if (tl.x >= 0 && tl.y >= 0 && tl.x + layout.size.width <= size.width && tl.y + layout.size.height <= size.height)
+                    drawText(layout, color = labelStyle.color.copy(alpha = 0.6f * a), topLeft = tl)
+            }
         }
+      } catch (e: Exception) {
+        // A launcher must never crash because of its wallpaper: skip the frame.
+      }
     }
 }
 
