@@ -677,6 +677,7 @@ fun SettingsScreen(vm: LauncherVM) {
         }
         item { Toggle("Start automatically in the car", s.driveAuto) }
         item { Toggle("Read new messages aloud", s.driveReadAloud) }
+        item { Toggle("Landscape Drive screen", s.driveLandscape) }
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
@@ -717,7 +718,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.9", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.10", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }

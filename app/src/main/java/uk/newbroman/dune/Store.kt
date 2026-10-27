@@ -87,6 +87,7 @@ class Store private constructor(ctx: Context) {
     // Drive mode
     val driveAuto = Flag("driveAuto", true)
     val driveReadAloud = Flag("driveReadAloud", true)
+    val driveLandscape = Flag("driveLandscape", true)
     val homeAddress = Str("homeAddress", "")
     var carDevices by mutableStateOf(readList("carDevices").toSet())
         private set

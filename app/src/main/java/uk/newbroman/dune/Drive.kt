@@ -11,6 +11,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.media.MediaMetadata
 import android.media.session.MediaController
@@ -26,6 +27,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -229,86 +232,137 @@ fun DriveScreen(vm: LauncherVM) {
     val items by NotifService.items.collectAsState()
     val messages = items.filter { it.isMessage }
     var showMessages by remember { mutableStateOf(false) }
+    val landscapeWanted = s.driveLandscape.value
 
-    DisposableEffect(Unit) {
+    DisposableEffect(landscapeWanted) {
         act.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // Lock to landscape (either way up, so it suits the cradle) while driving.
+        act.requestedOrientation = if (landscapeWanted) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         media.start()
-        onDispose { act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); media.stop() }
+        onDispose {
+            act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            media.stop()
+        }
     }
     val now by produceState(LocalDateTime.now()) {
         while (true) { value = LocalDateTime.now(); delay(1000L - System.currentTimeMillis() % 1000) }
     }
+    val time = now.format(DateTimeFormatter.ofPattern(if (s.clock24.value) "HH:mm" else "h:mm"))
 
-    Column(Modifier.fillMaxSize().background(Bg).systemBarsPadding().padding(16.dp)) {
-        // Top: time and exit
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(now.format(DateTimeFormatter.ofPattern(if (s.clock24.value) "HH:mm" else "h:mm")),
-                color = Fg, fontSize = 44.sp, fontWeight = FontWeight.Light)
-            Spacer(Modifier.width(14.dp))
-            Text("DRIVE", color = Sand, fontSize = 14.sp, letterSpacing = 3.sp)
-            Spacer(Modifier.weight(1f))
-            Text("exit ✕", color = Dim, fontSize = 18.sp, modifier = Modifier
-                .combinedClickable { Drive.set(act, false); vm.goHome() }.padding(12.dp))
-        }
-        Spacer(Modifier.height(10.dp))
+    val tiles: List<TileSpec> = listOf(
+        TileSpec("Home", "navigate") { act.runCmd(Cmd.Navigate(null)) },
+        TileSpec("Navigate…", "say where") { act.listen("Where to?") { it?.let { d -> act.runCmd(Cmd.Navigate(d)) } } },
+        TileSpec("Messages", if (messages.isEmpty()) "none new" else "${messages.size} new", messages.isNotEmpty()) { showMessages = true },
+        TileSpec("Spotify", null) { act.runCmd(Cmd.Spotify(null)) },
+        TileSpec("BBC Sounds", null) {
+            if (!act.launchPackage(BBC_SOUNDS)) act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.bbc.co.uk/sounds")))
+        },
+        TileSpec("Spheres", "music of the spheres") { Actions.openSpheres(act) },
+    )
 
-        // Now playing
-        Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF15140F), border = BorderStroke(1.dp, Faint),
-            modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                val app = media.appPkg?.let { vm.labelFor(it) }
-                Text(media.title ?: "Nothing playing", color = Fg, fontSize = 22.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(media.artist, app).joinToString("  ·  ").ifEmpty { " " }, color = Dim, fontSize = 15.sp,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    BigIcon("⏮") { media.control("previous") }
-                    BigIcon(if (media.playing) "⏸" else "▶") { if (!media.control("toggle")) act.toast("No player found – start Spotify or BBC Sounds, or re-allow Dune's notification access") }
-                    BigIcon("⏭") { media.control("next") }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Bg).systemBarsPadding().padding(12.dp)) {
+        if (maxWidth > maxHeight) {
+            // Landscape: controls on the left, big buttons (or messages) on the right.
+            Row(Modifier.fillMaxSize()) {
+                Column(Modifier.weight(0.42f).fillMaxHeight().padding(end = 10.dp)) {
+                    TopBar(vm, time, compact = true)
+                    Spacer(Modifier.height(6.dp))
+                    NowPlaying(vm, act, compact = true)
+                    Spacer(Modifier.weight(1f))
+                    vm.assistantReply?.let { Text(it, color = Dim, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(vertical = 4.dp)) }
+                    SpeakButton(act, Modifier.fillMaxWidth().height(76.dp))
+                }
+                Box(Modifier.weight(0.58f).fillMaxHeight()) {
+                    if (showMessages) MessagesPanel(vm, messages) { showMessages = false }
+                    else TileGrid(tiles, columns = 3, fill = true)
                 }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-
-        if (showMessages) {
-            Box(Modifier.weight(1f)) { MessagesPanel(vm, messages) { showMessages = false } }
         } else {
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-                Row(Modifier.fillMaxWidth()) {
-                    Tile("Home", "navigate") { act.runCmd(Cmd.Navigate(null)) }
-                    Tile("Navigate…", "say where") {
-                        act.listen("Where to?") { it?.let { d -> act.runCmd(Cmd.Navigate(d)) } }
-                    }
+            Column(Modifier.fillMaxSize()) {
+                TopBar(vm, time, compact = false)
+                Spacer(Modifier.height(10.dp))
+                NowPlaying(vm, act, compact = false)
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.weight(1f)) {
+                    if (showMessages) MessagesPanel(vm, messages) { showMessages = false }
+                    else TileGrid(tiles, columns = 2, fill = false)
                 }
-                Row(Modifier.fillMaxWidth()) {
-                    Tile("Spotify", null) { act.runCmd(Cmd.Spotify(null)) }
-                    Tile("BBC Sounds", null) {
-                        if (!act.launchPackage(BBC_SOUNDS)) act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://www.bbc.co.uk/sounds")))
-                    }
-                }
-                Row(Modifier.fillMaxWidth()) {
-                    Tile("Spheres", "music of the spheres") { Actions.openSpheres(act) }
-                    Tile("Messages", if (messages.isEmpty()) "none new" else "${messages.size} new", highlight = messages.isNotEmpty()) {
-                        showMessages = true
-                    }
-                }
-            }
-        }
-
-        vm.assistantReply?.let { Text(it, color = Dim, fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp)) }
-
-        // Big speak button
-        Surface(shape = RoundedCornerShape(40.dp), color = Sand, modifier = Modifier.fillMaxWidth().height(80.dp)
-            .combinedClickable(onLongClick = { act.tryStart(Intent(Intent.ACTION_VOICE_COMMAND)) }) {
-                act.listen("Say a command") { it?.let { t -> act.handleAsk(t, speak = true) } }
-            }) {
-            Box(contentAlignment = Alignment.Center) {
-                Text("🎤  Speak", color = Bg, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+                vm.assistantReply?.let { Text(it, color = Dim, fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp)) }
+                SpeakButton(act, Modifier.fillMaxWidth().height(80.dp))
             }
         }
     }
 
     vm.pendingReply?.let { ReplyConfirm(vm, it) }
+}
+
+private class TileSpec(val title: String, val sub: String?, val highlight: Boolean = false, val onClick: () -> Unit)
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TopBar(vm: LauncherVM, time: String, compact: Boolean) {
+    val act = LocalContext.current as MainActivity
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(time, color = Fg, fontSize = if (compact) 36.sp else 44.sp, fontWeight = FontWeight.Light)
+        Spacer(Modifier.width(12.dp))
+        Text("DRIVE", color = Sand, fontSize = 13.sp, letterSpacing = 3.sp)
+        Spacer(Modifier.weight(1f))
+        Text("exit ✕", color = Dim, fontSize = 18.sp, modifier = Modifier
+            .combinedClickable { Drive.set(act, false); vm.goHome() }.padding(12.dp))
+    }
+}
+
+@Composable
+private fun NowPlaying(vm: LauncherVM, act: MainActivity, compact: Boolean) {
+    val media = vm.media
+    Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF15140F), border = BorderStroke(1.dp, Faint),
+        modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(if (compact) 12.dp else 16.dp)) {
+            val app = media.appPkg?.let { vm.labelFor(it) }
+            Text(media.title ?: "Nothing playing", color = Fg, fontSize = if (compact) 19.sp else 22.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(listOfNotNull(media.artist, app).joinToString("  ·  ").ifEmpty { " " }, color = Dim, fontSize = 14.sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(if (compact) 6.dp else 10.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                BigIcon("⏮") { media.control("previous") }
+                BigIcon(if (media.playing) "⏸" else "▶") {
+                    if (!media.control("toggle")) act.toast("No player found – start Spotify or BBC Sounds, or re-allow Dune's notification access")
+                }
+                BigIcon("⏭") { media.control("next") }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SpeakButton(act: MainActivity, modifier: Modifier) {
+    Surface(shape = RoundedCornerShape(40.dp), color = Sand, modifier = modifier
+        .combinedClickable(onLongClick = { act.tryStart(Intent(Intent.ACTION_VOICE_COMMAND)) }) {
+            act.listen("Say a command") { it?.let { t -> act.handleAsk(t, speak = true) } }
+        }) {
+        Box(contentAlignment = Alignment.Center) {
+            Text("🎤  Speak", color = Bg, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+/** Big buttons in a grid. With [fill] the rows share the available height (landscape). */
+@Composable
+private fun TileGrid(tiles: List<TileSpec>, columns: Int, fill: Boolean) {
+    val rows = tiles.chunked(columns)
+    Column(if (fill) Modifier.fillMaxSize() else Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        rows.forEach { row ->
+            Row(if (fill) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth()) {
+                row.forEach { t -> Tile(t.title, t.sub, t.highlight, fill, t.onClick) }
+                repeat(columns - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
 }
 
 @Composable
@@ -320,10 +374,11 @@ private fun BigIcon(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RowScope.Tile(title: String, sub: String?, highlight: Boolean = false, onClick: () -> Unit) {
+private fun RowScope.Tile(title: String, sub: String?, highlight: Boolean = false, fill: Boolean = false, onClick: () -> Unit) {
     Surface(shape = RoundedCornerShape(20.dp), color = Color(0xFF15140F),
         border = BorderStroke(1.dp, if (highlight) Sand else Faint),
-        modifier = Modifier.weight(1f).height(104.dp).padding(5.dp).combinedClickableCompat(onClick)) {
+        modifier = Modifier.weight(1f).then(if (fill) Modifier.fillMaxHeight() else Modifier.height(104.dp))
+            .padding(5.dp).combinedClickableCompat(onClick)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
             Text(title, color = Fg, fontSize = 22.sp)
             if (sub != null) Text(sub, color = if (highlight) Sand else Dim, fontSize = 14.sp)
