@@ -1,0 +1,40 @@
+name: Build APK
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.DUNE_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DUNE_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > app/dune-release.jks
+            printf 'storeFile=app/dune-release.jks\nstorePassword=%s\nkeyAlias=dune\nkeyPassword=%s\n' "$KEYSTORE_PASSWORD" "$KEYSTORE_PASSWORD" > keystore.properties
+          else
+            echo "::warning::No signing secrets set - APK will be unsigned"
+          fi
+      - run: chmod +x gradlew && ./gradlew testReleaseUnitTest assembleRelease --no-daemon
+      - run: cp app/build/outputs/apk/release/app-release*.apk Dune.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dune-apk
+          path: Dune.apk
+      - name: Publish release for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" Dune.apk --title "Dune $GITHUB_REF_NAME" --generate-notes
