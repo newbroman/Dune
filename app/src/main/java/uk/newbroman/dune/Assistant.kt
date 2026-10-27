@@ -143,6 +143,10 @@ object Assistant {
                 when {
                     a != null -> { vm.launch(a); "Opening ${a.label}" }
                     cmd.app.contains("spheres") -> { Actions.openSpheres(act); "Opening Music of the Spheres" }
+                    vm.webApps.firstOrNull { it.label.lowercase().contains(cmd.app.lowercase()) } != null -> {
+                        val w = vm.webApps.first { it.label.lowercase().contains(cmd.app.lowercase()) }
+                        vm.openWeb(w); "Opening ${w.label}"
+                    }
                     cmd.app.startsWith("polish") || cmd.app.contains("phrase") -> {
                         act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(Phrases.APP_URL))); "Opening the Polish app"
                     }

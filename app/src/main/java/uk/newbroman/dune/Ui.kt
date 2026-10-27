@@ -718,7 +718,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.10", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.11", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -768,7 +768,7 @@ fun AppIcon(vm: LauncherVM, a: AppEntry, size: Dp) {
 @Composable
 private fun GroupsBlock(vm: LauncherVM) {
     val groups = vm.groupNames.map { it to vm.appsIn(it) }
-        .filter { (n, l) -> l.isNotEmpty() || n.equals("Links", true) }
+        .filter { (n, l) -> l.isNotEmpty() || n.equals("Links", true) || vm.webLinksFor(n).isNotEmpty() }
     if (groups.isEmpty()) return
     Header("Groups")
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -797,9 +797,13 @@ private fun GroupTile(vm: LauncherVM, name: String, list: List<AppEntry>) {
                             if (row.size == 1) Spacer(Modifier.size(21.dp))
                         }
                     }
-                    list.take(4).chunked(2).forEach { row ->
+                    // up to four little icons: installed apps first, then web apps
+                    val icons: List<@Composable () -> Unit> =
+                        list.take(4).map { a -> @Composable { AppIcon(vm, a, 21.dp) } } +
+                            vm.webLinksFor(name).take(4 - minOf(4, list.size)).map { w -> @Composable { WebIcon(vm, w, 21.dp) } }
+                    icons.chunked(2).forEach { row ->
                         Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { AppIcon(vm, it, 21.dp) }
+                            row.forEach { it() }
                             if (row.size == 1) Spacer(Modifier.size(21.dp))
                         }
                     }
@@ -838,7 +842,8 @@ fun GroupScreen(vm: LauncherVM) {
             )
             Spacer(Modifier.height(12.dp))
         }
-        if (list.isEmpty()) Text("No apps here yet", color = Dim, modifier = Modifier.padding(8.dp))
+        val web = vm.webLinksFor(name)
+        if (list.isEmpty() && web.isEmpty()) Text("No apps here yet", color = Dim, modifier = Modifier.padding(8.dp))
         val isLinks = name.equals("Links", true)
         if (isLinks) Text(
             "To add a page: open it in Chrome › ⋮ › Add to home screen. Long-press a link to remove it.",
@@ -847,6 +852,7 @@ fun GroupScreen(vm: LauncherVM) {
         LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).nestedScroll(gestures)) {
             if (isLinks) gridItems(vm.linkPinned, key = { "l" + it.pkg + it.id }) { p -> GridLink(vm, p) }
             gridItems(list, key = { it.key }) { a -> GridApp(vm, a) }
+            gridItems(web, key = { "w" + it.url }) { w -> GridWeb(vm, w) }
         }
     }
 }
@@ -1044,5 +1050,29 @@ private fun CoinbaseSettings(vm: LauncherVM) {
         val k = Coinbase.parseKey(name, secret)
         if (k == null) act.toast("Paste both the key name and the private key")
         else { vm.saveCoinbaseKey(k); name = ""; secret = "" }
+    }
+}
+
+/** A web app's own icon, or a sand-coloured initial while it loads / if it has none. */
+@Composable
+fun WebIcon(vm: LauncherVM, w: WebApp, size: Dp) {
+    val bmp = vm.webIcon(w)
+    if (bmp != null) Image(bmp, contentDescription = null, modifier = Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)))
+    else Box(Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(Color(0xFF2A2620)), contentAlignment = Alignment.Center) {
+        Text(w.label.take(1).uppercase(), color = Sand, fontSize = (size.value * 0.45f).sp)
+    }
+}
+
+@Composable
+private fun GridWeb(vm: LauncherVM, w: WebApp) {
+    Column(
+        Modifier.fillMaxWidth().combinedClickable { vm.openWeb(w) }.padding(vertical = 12.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        WebIcon(vm, w, 52.dp)
+        Text(
+            w.label, color = Fg, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp)
+        )
     }
 }

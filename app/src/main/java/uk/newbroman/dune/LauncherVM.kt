@@ -168,6 +168,37 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     }
     val media = MediaWatcher(app)
 
+    // ---------- web apps from the portfolio page
+
+    var webApps by mutableStateOf<List<WebApp>>(emptyList())
+        private set
+    private val webIcons = mutableStateMapOf<String, ImageBitmap>()
+
+    /** Bumped when icons arrive on disk, so tiles showing a placeholder look again. */
+    private var webIconsVersion by mutableIntStateOf(0)
+
+    fun webIcon(w: WebApp): ImageBitmap? {
+        webIconsVersion   // read so composition re-runs when new icons are downloaded
+        return webIcons[w.url] ?: WebApps.icon(ctx, w)?.also { webIcons[w.url] = it }
+    }
+
+    private fun sameSite(a: String, b: String) = a.trimEnd('/').equals(b.trimEnd('/'), true)
+
+    /** Portfolio apps shown in [group] (My apps: all; Languages: the language shelves), minus any already installed. */
+    fun webLinksFor(group: String): List<WebApp> {
+        val list = when {
+            group.equals("My apps", true) -> webApps
+            group.equals("Languages", true) -> webApps.filter { it.isLanguage }
+            else -> return emptyList()
+        }
+        // Hide a link only when the installed copy of that app is already in this same group.
+        return list.filterNot { w ->
+            apps.any { a -> ((a.webUrl != null && sameSite(a.webUrl, w.url)) || a.label.equals(w.label, true)) && groupOf(a) == group }
+        }
+    }
+
+    fun openWeb(w: WebApp) = ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(w.url)))
+
     private var phrases by mutableStateOf<List<Phrase>>(emptyList())
     var phraseOffset by mutableIntStateOf(0)
     val phrase: Phrase? get() = Phrases.forDay(phrases, java.time.LocalDate.now(), phraseOffset)
@@ -176,6 +207,11 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         la.registerCallback(cb, Handler(Looper.getMainLooper()))
         loadApps()
         Drive.init(app)
+        viewModelScope.launch {
+            webApps = WebApps.all(app)
+            WebApps.ensureIcons(app, webApps); webIcons.clear(); webIconsVersion++
+            if (WebApps.refresh(app)) { webApps = WebApps.all(app); webIcons.clear(); webIconsVersion++ }
+        }
         viewModelScope.launch {
             phrases = Phrases.all(app)
             Phrases.refresh(app)
