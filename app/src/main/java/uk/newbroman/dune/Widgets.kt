@@ -80,17 +80,7 @@ fun WidgetsBlock(vm: LauncherVM) {
                 Text(l, color = Sand, fontSize = 18.sp, modifier = Modifier.combinedClickable(onClick = f).padding(horizontal = 10.dp, vertical = 4.dp))
             }
         }
-        AndroidView(
-            factory = { c ->
-                act.widgetHost.createView(c, w.id, info).apply { setAppWidget(w.id, info) }
-            },
-            update = { v ->
-                val wDp = (act.resources.displayMetrics.widthPixels / act.resources.displayMetrics.density - 48).toInt()
-                if (android.os.Build.VERSION.SDK_INT >= 31) v.updateAppWidgetSize(Bundle(), listOf(SizeF(wDp.toFloat(), w.heightDp.toFloat())))
-                else @Suppress("DEPRECATION") v.updateAppWidgetSize(null, wDp, w.heightDp, wDp, w.heightDp)
-            },
-            modifier = Modifier.fillMaxWidth().height(w.heightDp.dp).padding(vertical = 4.dp),
-        )
+        HostedWidget(act, w.id, info, w.heightDp)
         }
     } }
 }
@@ -111,10 +101,15 @@ fun WidgetPickerScreen(vm: LauncherVM) {
         AppWidgetManager.getInstance(act).installedProviders.map { p ->
             Triple(p, p.loadLabel(pm), runCatching { pm.getApplicationLabel(pm.getApplicationInfo(p.provider.packageName, 0)).toString() }.getOrDefault(p.provider.packageName))
         }.sortedWith(compareBy({ it.third.lowercase() }, { it.second.lowercase() }))
+            .let { all ->
+                // Choosing the weather widget: show only Weawow's widgets (if it has any).
+                if (vm.widgetTarget == "weather") all.filter { it.first.provider.packageName == WEAWOW || it.third.equals("weawow", true) }.ifEmpty { all }
+                else all
+            }
     }
     var query by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 20.dp)) {
-        Text("←  Add a widget", color = Fg, fontSize = 22.sp,
+        Text(if (vm.widgetTarget == "weather") "←  Choose a weather widget" else "←  Add a widget", color = Fg, fontSize = 22.sp,
             modifier = Modifier.combinedClickable { vm.goHome() }.padding(top = 20.dp, bottom = 12.dp))
         androidx.compose.material3.OutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Search, e.g. translate") },
@@ -139,3 +134,19 @@ fun WidgetPickerScreen(vm: LauncherVM) {
         }
     }
 }
+
+/** One app widget, sized to the screen width and [heightDp]. */
+@Composable
+fun HostedWidget(act: MainActivity, id: Int, info: AppWidgetProviderInfo, heightDp: Int) {
+    AndroidView(
+        factory = { c -> act.widgetHost.createView(c, id, info).apply { setAppWidget(id, info) } },
+        update = { v ->
+            val wDp = (act.resources.displayMetrics.widthPixels / act.resources.displayMetrics.density - 48).toInt()
+            if (android.os.Build.VERSION.SDK_INT >= 31) v.updateAppWidgetSize(Bundle(), listOf(SizeF(wDp.toFloat(), heightDp.toFloat())))
+            else @Suppress("DEPRECATION") v.updateAppWidgetSize(null, wDp, heightDp, wDp, heightDp)
+        },
+        modifier = Modifier.fillMaxWidth().height(heightDp.dp).padding(vertical = 4.dp),
+    )
+}
+
+const val WEAWOW = "com.weawow"

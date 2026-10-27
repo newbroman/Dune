@@ -82,6 +82,20 @@ class Store private constructor(ctx: Context) {
     val showAssistant = Flag("showAssistant", true)
     val showWidgets = Flag("showWidgets", true)
     val showCoinbase = Flag("showCoinbase", true)
+    /** Widget shown in place of Dune's own weather, as "id:heightDp" (blank = Dune's weather). */
+    val weatherWidget = Str("weatherWidget", "")
+
+    // Dock: the few apps used most, always at the bottom of the home screen
+    var dock by mutableStateOf(readList("dock"))
+        private set
+    val dockSeeded = Flag("dockSeeded", false)
+    fun saveDock(l: List<String>) { dock = l.distinct().take(5); writeList("dock", dock) }
+    fun toggleDock(key: String) = saveDock(if (key in dock) dock - key else dock + key)
+    fun moveDock(key: String, by: Int) {
+        val l = dock.toMutableList(); val i = l.indexOf(key); val j = i + by
+        if (i < 0 || j !in l.indices) return
+        l.removeAt(i); l.add(j, key); saveDock(l)
+    }
     val hideBalances = Flag("hideBalances", false)
 
     // Drive mode

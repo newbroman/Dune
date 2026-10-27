@@ -180,6 +180,7 @@ fun HomeScreen(vm: LauncherVM) {
             if (s.showL14.value) item { L14Block(vm) }
             item { Spacer(Modifier.height(32.dp)) }
         }
+        if (vm.dockApps.isNotEmpty()) Dock(vm)
         Row(
             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -335,7 +336,21 @@ private fun WeatherBlock(vm: LauncherVM) {
             }
         } else vm.refreshWeather(true)
     }
-    Column(Modifier.padding(top = 20.dp).combinedClickable(onClick = tap)) {
+    val weawow = vm.weatherApp
+    val open: () -> Unit = { if (weawow != null) vm.launch(weawow) else tap() }
+
+    // A Weawow (or other) widget chosen for this spot replaces Dune's own weather.
+    val placed = vm.store.weatherWidget.value.split(':')
+    val wid = placed.getOrNull(0)?.toIntOrNull()
+    val info = remember(wid) { wid?.let { android.appwidget.AppWidgetManager.getInstance(act).getAppWidgetInfo(it) } }
+    if (wid != null && info != null) {
+        Box(Modifier.padding(top = 16.dp)) {
+            HostedWidget(act as MainActivity, wid, info, placed.getOrNull(1)?.toIntOrNull() ?: 140)
+        }
+        return
+    }
+
+    Column(Modifier.padding(top = 20.dp).combinedClickable(onLongClick = tap, onClick = open)) {
         if (w != null) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Text("${w.temp}°", color = Sand, fontSize = 30.sp, fontWeight = FontWeight.Light)
@@ -351,6 +366,10 @@ private fun WeatherBlock(vm: LauncherVM) {
         }
         vm.weatherMsg?.let { Text(it, color = Dim, fontSize = 14.sp) }
     }
+    if (weawow != null) Text(
+        "use a Weawow widget here  →", color = Faint, fontSize = 13.sp,
+        modifier = Modifier.combinedClickable { vm.chooseWeatherWidget() }.padding(vertical = 4.dp)
+    )
 }
 
 @Composable
@@ -601,6 +620,8 @@ private fun AppRow(vm: LauncherVM, a: AppEntry) {
                 DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
             }
             DropdownMenuItem(text = { Text("Move to group…  (${vm.groupOf(a)})") }, onClick = { menu = false; vm.moving = a })
+            DropdownMenuItem(text = { Text(if (a.key in s.dock) "Remove from dock" else "Add to dock") },
+                onClick = { menu = false; s.toggleDock(a.key) })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
@@ -682,6 +703,15 @@ fun SettingsScreen(vm: LauncherVM) {
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
         item { Header("Weather") }
+        item {
+            if (s.weatherWidget.value.isNotBlank()) {
+                Note("The weather spot shows a widget.")
+                LinkRow("Change the weather widget") { vm.chooseWeatherWidget() }
+                LinkRow("Make it taller") { (act as MainActivity).resizeWeatherWidget(40) }
+                LinkRow("Make it shorter") { (act as MainActivity).resizeWeatherWidget(-40) }
+                LinkRow("Use Dune's own weather instead") { (act as MainActivity).clearWeatherWidget() }
+            } else LinkRow("Use a Weawow widget for the weather") { vm.chooseWeatherWidget() }
+        }
         item { Field("Place (blank = phone location)", s.weatherPlace) }
 
         item { Header("Termux shortcuts") }
@@ -718,7 +748,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.11", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.12", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -883,6 +913,8 @@ private fun GridApp(vm: LauncherVM, a: AppEntry) {
             DropdownMenuItem(
                 text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
                 onClick = { menu = false; s.toggleFavourite(a.key) })
+            DropdownMenuItem(text = { Text(if (a.key in s.dock) "Remove from dock" else "Add to dock") },
+                onClick = { menu = false; s.toggleDock(a.key) })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
@@ -1074,5 +1106,32 @@ private fun GridWeb(vm: LauncherVM, w: WebApp) {
             w.label, color = Fg, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp)
         )
+    }
+}
+
+/** The handful of apps you open most, one tap from the home screen. Long-press to rearrange. */
+@Composable
+private fun Dock(vm: LauncherVM) {
+    val s = vm.store
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+        vm.dockApps.forEach { a ->
+            var menu by remember { mutableStateOf(false) }
+            Box {
+                Column(
+                    Modifier.width(76.dp).combinedClickable(onLongClick = { menu = true }, onClick = { vm.launch(a) })
+                        .padding(vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    AppIcon(vm, a, 46.dp)
+                    Text(a.label, color = Dim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 4.dp))
+                }
+                DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(text = { Text("Move left") }, onClick = { menu = false; s.moveDock(a.key, -1) })
+                    DropdownMenuItem(text = { Text("Move right") }, onClick = { menu = false; s.moveDock(a.key, 1) })
+                    DropdownMenuItem(text = { Text("Remove from dock") }, onClick = { menu = false; s.toggleDock(a.key) })
+                }
+            }
+        }
     }
 }

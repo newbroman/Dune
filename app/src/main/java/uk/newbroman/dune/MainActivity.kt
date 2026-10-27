@@ -103,12 +103,28 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun place(id: Int, info: AppWidgetProviderInfo) {
-        vm.store.addWidget(id, defaultWidgetHeight(this, info))
+        if (vm.widgetTarget == "weather") {
+            // Replace whatever was in the weather spot.
+            vm.store.weatherWidget.value.substringBefore(':').toIntOrNull()?.let { runCatching { widgetHost.deleteAppWidgetId(it) } }
+            vm.store.weatherWidget.set("$id:${defaultWidgetHeight(this, info).coerceAtLeast(120)}")
+        } else vm.store.addWidget(id, defaultWidgetHeight(this, info))
+        vm.widgetTarget = null
         pendingWidget = null
         vm.goHome()
     }
 
     fun removeWidget(id: Int) { widgetHost.deleteAppWidgetId(id); vm.store.dropWidget(id) }
+
+    /** Back to Dune's own weather. */
+    fun clearWeatherWidget() {
+        vm.store.weatherWidget.value.substringBefore(':').toIntOrNull()?.let { runCatching { widgetHost.deleteAppWidgetId(it) } }
+        vm.store.weatherWidget.set("")
+    }
+
+    fun resizeWeatherWidget(by: Int) {
+        val (id, h) = vm.store.weatherWidget.value.split(':').let { (it.getOrNull(0)?.toIntOrNull() ?: return) to (it.getOrNull(1)?.toIntOrNull() ?: 140) }
+        vm.store.weatherWidget.set("$id:${(h + by).coerceIn(60, 500)}")
+    }
 
     @Deprecated("Needed for the widget configure screen, which only reports back this way")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

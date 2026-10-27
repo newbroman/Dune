@@ -138,6 +138,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** A request Dune couldn't handle itself: offer Claude / Gemini / Google. */
     var assistantFallback by mutableStateOf<String?>(null)
     var pendingReply by mutableStateOf<PendingReply?>(null)
+    /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */
+    var widgetTarget by mutableStateOf<String?>(null)
 
     // ---------- Coinbase
     var coinbaseKey by mutableStateOf(Coinbase.load(app))
@@ -251,6 +253,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
                     .sortedBy { it.label.lowercase() }
             }
             icons.clear(); iconLoading.clear()
+            seedDock()
         }
     }
 
@@ -368,6 +371,25 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         return true
     }
 
+    /** First run: Google News, Weawow and Claude, if they're installed. */
+    private fun seedDock() {
+        if (store.dockSeeded.value || apps.isEmpty()) return
+        val wanted = listOf(
+            listOf("com.google.android.apps.magazines") to "google news",
+            listOf("com.weawow") to "weawow",
+            listOf(CLAUDE) to "claude",
+        )
+        val keys = wanted.mapNotNull { (pkgs, label) ->
+            (apps.firstOrNull { it.pkg in pkgs } ?: apps.firstOrNull { it.label.equals(label, true) })?.key
+        }
+        store.saveDock(keys); store.dockSeeded.set(true)
+    }
+
+    val dockApps: List<AppEntry> get() = store.dock.mapNotNull { appByKey(it) }
+
+    /** Weawow if it's installed (tap on the weather), else null. */
+    val weatherApp: AppEntry? get() = apps.firstOrNull { it.pkg == "com.weawow" || it.label.equals("weawow", true) }
+
     fun appByKey(key: String) = apps.firstOrNull { it.key == key }
     fun labelFor(pkg: String) = apps.firstOrNull { it.pkg == pkg }?.label
         ?: runCatching { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() }.getOrDefault(pkg)
@@ -383,9 +405,12 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         try { la.startAppDetailsActivity(ComponentName(a.pkg, a.cls), a.user, null, null) } catch (_: Exception) { }
     }
 
+    fun chooseWeatherWidget() { widgetTarget = "weather"; screen = Screen.WIDGET_PICK }
+
     fun goHome() {
         if (screen == Screen.SETTINGS) afterSettings()
         assistantFallback = null
+        widgetTarget = null
         // While driving, Home returns to the Drive screen.
         screen = if (Drive.active.value && screen != Screen.DRIVE) Screen.DRIVE else Screen.HOME
         resumeTick++
