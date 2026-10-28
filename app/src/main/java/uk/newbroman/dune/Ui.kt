@@ -91,6 +91,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.app.NotificationManagerCompat
 import kotlinx.coroutines.delay
 import java.time.LocalDateTime
@@ -163,22 +164,24 @@ fun HomeScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
     // Three pages: swipe right for Groups, left for Widgets; home in the middle.
-    val pager = rememberPagerState(initialPage = 1) { 3 }
+    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets.
+    val pager = rememberPagerState(initialPage = HOME_PAGE) { 4 }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != 1) pager.animateScrollToPage(1) }
+    LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
     LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
       HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
        when (page) {
-        0 -> SidePage("Groups", gestures) {
+        0 -> RozmowaPage()
+        1 -> SidePage("Groups", gestures) {
             item { GroupsBlock(vm, title = false) }
             item {
                 Text("Long-press any app › Move to group to change where it goes. Rules are in settings.",
                     color = Faint, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             }
         }
-        2 -> SidePage("Widgets", gestures) {
+        3 -> SidePage("Widgets", gestures) {
             item { WidgetsBlock(vm) }
         }
         else -> LazyColumn(
@@ -207,7 +210,7 @@ fun HomeScreen(vm: LauncherVM) {
       }
         // Page marker: groups · home · widgets (tap to jump)
         Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
-            listOf("groups", "•", "widgets").forEachIndexed { i, l ->
+            listOf("rozmowa", "groups", "•", "widgets").forEachIndexed { i, l ->
                 Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 12.sp,
                     modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 12.dp, vertical = 4.dp))
             }
@@ -779,7 +782,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.15", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.16", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -1147,5 +1150,27 @@ private fun SidePage(title: String, gestures: NestedScrollConnection, content: a
         item { Text(title, color = Fg, fontSize = 30.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 36.dp, bottom = 12.dp)) }
         content()
         item { Spacer(Modifier.height(32.dp)) }
+    }
+}
+
+const val HOME_PAGE = 2
+
+/** Rozmowa, Martin's Polish conversation app, running inside Dune with the mic and voice working. */
+@Composable
+private fun RozmowaPage() {
+    val act = LocalContext.current as MainActivity
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Rozmowa", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light)
+            Spacer(Modifier.weight(1f))
+            Text("reload", color = Dim, fontSize = 13.sp,
+                modifier = Modifier.combinedClickable { act.rozmowa().view.reload() }.padding(10.dp))
+            Text("full screen ↗", color = Dim, fontSize = 13.sp,
+                modifier = Modifier.combinedClickable { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(SpeechWebView.ROZMOWA))) }.padding(10.dp))
+        }
+        AndroidView(
+            factory = { act.rozmowa().detached() },
+            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+        )
     }
 }

@@ -14,8 +14,8 @@ android {
         applicationId = "uk.newbroman.dune"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.15"
+        versionCode = 18
+        versionName = "1.16"
     }
 
     // Release key is NOT in git. Locally it comes from keystore.properties (next to this
@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.webkit:webkit:1.12.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }

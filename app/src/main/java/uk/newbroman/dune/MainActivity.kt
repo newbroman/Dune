@@ -72,6 +72,13 @@ class MainActivity : ComponentActivity() {
 
     fun runCmd(cmd: Cmd) { Assistant.run(this, vm, cmd)?.let { vm.assistantReply = it; if (vm.screen == Screen.DRIVE) Speaker.speak(this, it) } }
 
+    // ---------- the Rozmowa page (one WebView kept for the life of the activity, so the chat survives swipes)
+
+    private var rozmowaWeb: SpeechWebView? = null
+    fun rozmowa(): SpeechWebView = rozmowaWeb ?: SpeechWebView(this, SpeechWebView.ROZMOWA).also { rozmowaWeb = it }
+
+    override fun onDestroy() { rozmowaWeb?.destroy(); rozmowaWeb = null; super.onDestroy() }
+
     // ---------- widgets
 
     lateinit var widgetHost: AppWidgetHost
