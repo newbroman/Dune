@@ -27,7 +27,19 @@ data class Weather(
     val low: Int,
     val rainChance: Int?,
     val place: String,
+    /** Where the wind comes FROM, degrees from north. */
+    val windDir: Int = 0,
+    val gust: Int = 0,
+    val cloud: Int = 0,
+    /** mm in the last hour, rain and snow together. */
+    val precip: Double = 0.0,
+    val isDay: Boolean = true,
 ) {
+    val thunder get() = code >= 95
+    val snowing get() = code in 71..77 || code == 85 || code == 86
+    val raining get() = !snowing && (precip > 0 || code in 51..67 || code in 80..82 || thunder)
+    val foggy get() = code == 45 || code == 48
+
     val summary: String get() = describe(code)
 
     companion object {
@@ -36,7 +48,7 @@ data class Weather(
             val url = String.format(
                 Locale.US,
                 "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f" +
-                    "&current=temperature_2m,weather_code,wind_speed_10m" +
+                    "&current=temperature_2m,weather_code,wind_speed_10m,wind_direction_10m,wind_gusts_10m,cloud_cover,precipitation,is_day" +
                     "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max" +
                     "&timezone=auto&forecast_days=1&wind_speed_unit=mph",
                 lat, lon
@@ -53,6 +65,11 @@ data class Weather(
                 low = Math.round(d.getJSONArray("temperature_2m_min").getDouble(0)).toInt(),
                 rainChance = if (rain != null && !rain.isNull(0)) rain.getInt(0) else null,
                 place = place,
+                windDir = cur.optDouble("wind_direction_10m", 0.0).toInt(),
+                gust = Math.round(cur.optDouble("wind_gusts_10m", 0.0)).toInt(),
+                cloud = cur.optInt("cloud_cover", 0),
+                precip = cur.optDouble("precipitation", 0.0),
+                isDay = cur.optInt("is_day", 1) == 1,
             )
         }
 

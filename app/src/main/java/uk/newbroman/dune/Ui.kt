@@ -154,7 +154,10 @@ fun HomeScreen(vm: LauncherVM) {
     )
     val isDefault = remember(vm.resumeTick) { Actions.isDefaultHome(ctx) }
 
-    if (s.showSky.value) SkyBackground(vm.skyLat, vm.skyLon, 0.9f)
+    if (s.showSky.value) {
+        val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME, vm.skyLat, vm.skyLon)
+        SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
+    }
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         LazyColumn(
             Modifier.weight(1f).fillMaxWidth().nestedScroll(gestures).padding(horizontal = 24.dp),
@@ -249,14 +252,14 @@ private fun ClockBlock(vm: LauncherVM) {
     )
     if (vm.store.polishClock.value) {
         Text(
-            PolishTime.dateLine(now.toLocalDate()), color = Dim, fontSize = 18.sp,
-            modifier = Modifier.combinedClickable(onLongClick = { Actions.openCalendar(ctx) }) {
+            PolishTime.timeWords(now.hour, now.minute), color = Sand.copy(alpha = 0.9f), fontSize = 18.sp,
+            modifier = Modifier.combinedClickable {
                 Speaker.speak(ctx, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL)
             }
         )
         Text(
-            PolishTime.timeWords(now.hour, now.minute), color = Sand.copy(alpha = 0.85f), fontSize = 16.sp,
-            modifier = Modifier.padding(top = 2.dp).combinedClickable {
+            PolishTime.dateWords(now.toLocalDate()), color = Dim, fontSize = 17.sp,
+            modifier = Modifier.padding(top = 2.dp).combinedClickable(onLongClick = { Actions.openCalendar(ctx) }) {
                 Speaker.speak(ctx, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL)
             }
         )
@@ -678,6 +681,8 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Notifications", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
         item { Toggle("Sky background", s.showSky) }
+        item { Toggle("Weather on the sky", s.skyWeather) }
+        item { Toggle("Turn the sky with the compass", s.skyCompass) }
         item { Toggle("App groups", s.showGroups) }
         item { Toggle("Favourites", s.showFavs) }
         item { Toggle("Termux shortcuts", s.showTermux) }
@@ -745,7 +750,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.13", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.14", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }

@@ -207,7 +207,13 @@ fun altAz(ra: Double, dec: Double, latDeg: Double, lstDeg: Double): Pair<Double,
  * on your back with your head to the north). Stars twinkle; the sky turns with real time.
  */
 @Composable
-fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier = Modifier.fillMaxSize()) {
+fun SkyBackground(
+    lat: Double, lon: Double, strength: Float,
+    weather: Weather? = null,
+    /** True-north bearing the phone faces; the sky turns so that way is up. Null = north up. */
+    heading: Float? = null,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     var frame by remember { mutableLongStateOf(0L) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -230,9 +236,10 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
         val cx = size.width / 2f; val cy = size.height * 0.46f
         // Whole sky dome fits the screen width, so every body above the horizon is on screen.
         val r = minOf(size.width, size.height) * 0.47f
+        val h = (heading ?: 0f).toDouble()
         fun pos(alt: Double, az: Double): Offset {
             val rr = ((90 - alt) / 90).toFloat() * r
-            return Offset(cx - rr * sind(az).toFloat(), cy - rr * cosd(az).toFloat())
+            return Offset(cx - rr * sind(az - h).toFloat(), cy - rr * cosd(az - h).toFloat())
         }
 
         // Sky colour from the Sun's altitude: black at night, deep blue at twilight and by day.
@@ -246,7 +253,8 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
         }
         drawRect(Brush.radialGradient(listOf(top, Color.Black), Offset(cx, cy), r * 1.1f))
         val dayDim = when { sunAlt > 0 -> 0.55f; sunAlt > -6 -> 0.75f; else -> 1f }
-        val a = strength * dayDim
+        val cloudDim = 1f - 0.75f * ((weather?.cloud ?: 0) / 100f) - (if (weather?.foggy == true) 0.2f else 0f)
+        val a = strength * dayDim * cloudDim.coerceIn(0.1f, 1f)
         val t = frame / 1000.0
 
         // Horizon
@@ -303,6 +311,9 @@ fun SkyBackground(lat: Double, lon: Double, strength: Float, modifier: Modifier 
                     drawText(layout, color = labelStyle.color.copy(alpha = 0.6f * a), topLeft = tl)
             }
         }
+
+        // The weather over the stars, as on the Spheres weather page.
+        if (weather != null) drawWeather(weather, h, t, cx, cy, r, sunAlt > -6)
       } catch (e: Exception) {
         // A launcher must never crash because of its wallpaper: skip the frame.
       }
@@ -348,4 +359,105 @@ private fun DrawScope.drawMoon(c: Offset, r: Float, elong: Double, sun: Offset?,
     path.close()
     rotate(angle, c) { drawPath(path, Color(0xFFF1EDE4).copy(alpha = (0.95f * a).coerceIn(0f, 1f))) }
     if (abs(k) < 0.02f) drawCircle(Color(0x33F1EDE4), r, c, style = androidx.compose.ui.graphics.drawscope.Stroke(1f))
+}
+
+/**
+ * Clouds drifting with the wind, wind streaks, rain or snow blown sideways, fog, lightning and,
+ * after rain in daylight, a rainbow. [h] is the heading, so the wind blows the right way across
+ * the turned sky. Everything is worked out from the time, so there's no particle state to keep.
+ */
+private fun DrawScope.drawWeather(w: Weather, h: Double, t: Double, cx: Float, cy: Float, r: Float, light: Boolean) {
+    val W = size.width; val H = size.height
+    val cl = w.cloud / 100f
+    // The wind blows towards dir+180°. On this looking-up chart a bearing b is at (−sin(b−h), −cos(b−h)).
+    val toward = w.windDir + 180.0
+    val vx = (-sind(toward - h)).toFloat(); val vy = (-cosd(toward - h)).toFloat()
+    val speed = (6 + w.wind * 2.2f)                         // px per second for the clouds
+
+    // Fog: a grey veil
+    if (w.foggy) drawRect(Color(0xFF8E8A82).copy(alpha = 0.18f))
+
+    // Clouds: soft clumps of three discs, more and thicker with more cover
+    if (cl > 0.05f) {
+        val n = (3 + 9 * cl).toInt()
+        val col = if (light) Color(0xFFDCE2EC) else Color(0xFF5A6078)
+        val alpha = if (light) 0.05f + 0.15f * cl else 0.07f + 0.17f * cl
+        val span = W + 2 * r
+        for (i in 0 until n) {
+            val bx = (i * 173.0 + t * speed * vx).toFloat()
+            val by = (i * 97.0 + (i * i) * 31.0 + t * speed * vy).toFloat()
+            val x = ((bx % span) + span) % span - r
+            val y = ((by % (H + 2 * r)) + (H + 2 * r)) % (H + 2 * r) - r
+            val s = r * (0.22f + 0.12f * ((i * 37) % 10) / 10f)
+            for ((dx, dy, k) in listOf(Triple(0f, 0f, 1f), Triple(0.7f, 0.15f, 0.8f), Triple(-0.65f, 0.2f, 0.75f))) {
+                val c = Offset(x + dx * s, y + dy * s)
+                drawCircle(Brush.radialGradient(listOf(col.copy(alpha = alpha), Color.Transparent), c, s * k), s * k, c)
+            }
+        }
+    }
+
+    // Wind streaks
+    val streaks = (w.wind.coerceIn(0, 60) * 0.8f).toInt()
+    if (streaks > 2) {
+        val len = 14f + w.wind * 0.6f
+        for (i in 0 until streaks) {
+            val sp = 40f + w.wind * 6f * (1 + (i % 5) / 5f)
+            val x0 = (((i * 211.0 + t * sp * vx) % W) + W) % W
+            val y0 = (((i * 157.0 + t * sp * vy) % H) + H) % H
+            val p = Offset(x0.toFloat(), y0.toFloat())
+            drawLine(Color(0x2EE9E1CC), p, p - Offset(vx * len, vy * len), 1.2f)
+        }
+    }
+
+    // Rain or snow, falling down the screen and blown sideways by the wind
+    if (w.raining || w.snowing) {
+        val n = if (w.snowing) 70 else (25 + w.precip * 14).toInt().coerceIn(25, 170)
+        val drift = vx * w.wind / 6f
+        for (i in 0 until n) {
+            val s = ((i * 7919) % 1000) / 1000f
+            val fall = if (w.snowing) 40f else 520f
+            val y = ((((t * fall * (1 + s)) + i * 97.0) % (H + 40)) - 20).toFloat()
+            val x = (((i * 131f + drift * y * 0.4f) % W) + W) % W
+            if (w.snowing) drawCircle(Color(0xD9F0F4FF), 1.8f, Offset(x + 3f * sin(t + i).toFloat(), y))
+            else drawLine(Color(0x73AAC8EB), Offset(x, y), Offset(x + drift, y + 12f), 1.3f)
+        }
+    }
+
+    // Lightning: now and then, a flicker over everything
+    if (w.thunder) {
+        val period = 17.0; val phase = (t + 3.0) % period
+        if (phase < 0.35) {
+            val flick = if (((t * 23).toInt() % 3) == 0) 0.25f else 1f
+            drawRect(Color(0xFFE6EBFF).copy(alpha = 0.35f * (1f - (phase / 0.35).toFloat()) * flick))
+        }
+    }
+
+    // A rainbow after rain while the Sun is up and the sky isn't closed
+    if (light && w.isDay && w.raining && w.cloud < 85) {
+        val cols = listOf(0xFFFF4A3D, 0xFFFF9A2E, 0xFFFFE14A, 0xFF5FD35F, 0xFF43A6FF, 0xFF4B55D6, 0xFF9A54D6)
+        val base = minOf(W, H) * 0.62f
+        cols.forEachIndexed { i, c ->
+            drawArc(Color(c).copy(alpha = 0.16f), 180f, 180f, false,
+                topLeft = Offset(W / 2 - base + i * 5f, H * 1.02f - base + i * 5f),
+                size = androidx.compose.ui.geometry.Size((base - i * 5f) * 2, (base - i * 5f) * 2),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(4f))
+        }
+    }
+
+    // The wind's arrow on the horizon ring: from where it blows, pointing in
+    if (w.wind >= 2) {
+        val from = w.windDir.toDouble()
+        val ox = cx - r * 1.0f * sind(from - h).toFloat(); val oy = cy - r * 1.0f * cosd(from - h).toFloat()
+        val ix = cx - r * 0.84f * sind(from - h).toFloat(); val iy = cy - r * 0.84f * cosd(from - h).toFloat()
+        val col = Color(0xE662A597)
+        drawLine(col, Offset(ox, oy), Offset(ix, iy), 2.5f)
+        val ux = (ix - ox); val uy = (iy - oy); val l = kotlin.math.sqrt(ux * ux + uy * uy).coerceAtLeast(1f)
+        val nx = ux / l; val ny = uy / l
+        val tip = Offset(ix, iy)
+        val path = Path().apply {
+            moveTo(tip.x + nx * 10, tip.y + ny * 10)
+            lineTo(tip.x - ny * 6, tip.y + nx * 6); lineTo(tip.x + ny * 6, tip.y - nx * 6); close()
+        }
+        drawPath(path, col)
+    }
 }
