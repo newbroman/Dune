@@ -77,7 +77,7 @@ class MainActivity : ComponentActivity() {
     private var rozmowaWeb: SpeechWebView? = null
     fun rozmowa(): SpeechWebView = rozmowaWeb ?: SpeechWebView(this, SpeechWebView.ROZMOWA).also { rozmowaWeb = it }
 
-    override fun onDestroy() { rozmowaWeb?.destroy(); rozmowaWeb = null; super.onDestroy() }
+    override fun onDestroy() { runCatching { unregisterReceiver(wakeReceiver) }; rozmowaWeb?.destroy(); rozmowaWeb = null; super.onDestroy() }
 
     // ---------- widgets
 
@@ -162,7 +162,14 @@ class MainActivity : ComponentActivity() {
         permLauncher.launch(permission)
     }
 
+    /** Counts the phone being woken, so the phrase of the day moves on every third time. */
+    private val wakeReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: Intent) { if (i.action == Intent.ACTION_SCREEN_ON) vm.phoneWoken() }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        androidx.core.content.ContextCompat.registerReceiver(this, wakeReceiver,
+            android.content.IntentFilter(Intent.ACTION_SCREEN_ON), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),

@@ -5,7 +5,7 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 (online status, SSH, Termius, Wake-on-LAN, one-tap remote commands).
 
 ## Gestures
-- **Swipe right** – your app groups; **twice** – Rozmowa, the Polish conversation app, with mic and voice.
+- **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice.
   **Swipe left** – your widgets. Home or Back returns to the middle.
 - **Swipe up** (or tap *apps*) – app list with search. Enter launches the top match; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
@@ -15,7 +15,8 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 
 ## Home screen extras
 - **Polish clock** – the date in Polish and the time in words (*osiemnasta czterdzieści jeden*). Tap to hear it.
-- **Phrase of the day** – from Polish Phrase Master; tap to hear it, *another* for a different one, long-press to open the app.
+- **Phrase of the day** – from Polish Phrase Master; moves on every third time you wake the phone. Tap to hear it, *another* for a different one, long-press to open the app.
+- **Claude** – its icon sits beside the clock for one-tap access.
 - **Ask Dune** – type or tap 🎤: "navigate to…", "set an alarm for 7:30", "5 minute timer", "add task…",
   "how do you say … in Polish", "play … on Spotify", "open …". Anything else offers Claude, Gemini, Google or Translate.
 - **Coinbase** – your holdings and total in pounds, from a *view-only* Coinbase API key (ECDSA) stored encrypted

@@ -277,11 +277,18 @@ private fun ClockBlock(vm: LauncherVM) {
         while (true) { value = LocalDateTime.now(); delay(1000L - System.currentTimeMillis() % 1000) }
     }
     val pattern = if (vm.store.clock24.value) "HH:mm" else "h:mm"
-    Text(
-        now.format(DateTimeFormatter.ofPattern(pattern)), color = Fg, fontSize = 76.sp,
-        fontWeight = FontWeight.Thin,
-        modifier = Modifier.padding(top = 36.dp).combinedClickable { Actions.openClock(ctx) }
-    )
+    Row(Modifier.fillMaxWidth().padding(top = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            now.format(DateTimeFormatter.ofPattern(pattern)), color = Fg, fontSize = 76.sp,
+            fontWeight = FontWeight.Thin,
+            modifier = Modifier.combinedClickable { Actions.openClock(ctx) }
+        )
+        Spacer(Modifier.weight(1f))
+        // Claude, one tap from the clock
+        vm.claudeApp?.let { c ->
+            Box(Modifier.clip(CircleShape).combinedClickable { vm.launch(c) }.padding(10.dp)) { AppIcon(vm, c, 44.dp) }
+        }
+    }
     if (vm.store.polishClock.value) {
         Text(
             PolishTime.timeWords(now.hour, now.minute), color = Sand.copy(alpha = 0.9f), fontSize = 18.sp,
@@ -305,7 +312,7 @@ private fun ClockBlock(vm: LauncherVM) {
 private fun PhraseBlock(vm: LauncherVM) {
     val ctx = LocalContext.current
     val p = vm.phrase ?: return
-    Header("Phrase of the day", "another") { vm.phraseOffset++ }
+    Header("Phrase of the day", "another") { vm.nextPhrase() }
     Column(
         Modifier.fillMaxWidth().combinedClickable(
             onLongClick = { ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(Phrases.APP_URL))) },
@@ -835,45 +842,23 @@ private fun GroupsBlock(vm: LauncherVM, title: Boolean = true) {
         .filter { (n, l) -> l.isNotEmpty() || n.equals("Links", true) || vm.webLinksFor(n).isNotEmpty() }
     if (groups.isEmpty()) return
     if (title) Header("Groups")
-    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        groups.forEach { (name, list) -> GroupTile(vm, name, list) }
-        // keep the last row left-aligned
-        repeat((4 - groups.size % 4) % 4) { Spacer(Modifier.width(72.dp)) }
-    }
+    groups.forEach { (name, list) -> GroupRow(vm, name, list) }
 }
 
+/** One category on the groups page: just its name and how many things are in it. */
 @Composable
-private fun GroupTile(vm: LauncherVM, name: String, list: List<AppEntry>) {
+private fun GroupRow(vm: LauncherVM, name: String, list: List<AppEntry>) {
     var menu by remember { mutableStateOf(false) }
+    val count = list.size + vm.webLinksFor(name).size + (if (name.equals("Links", true)) vm.linkPinned.size else 0)
     Box {
-        Column(
-            Modifier.width(72.dp).padding(bottom = 12.dp)
-                .combinedClickable(onLongClick = { menu = true }, onClick = { vm.showGroup(name) }),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Row(
+            Modifier.fillMaxWidth()
+                .combinedClickable(onLongClick = { menu = true }, onClick = { vm.showGroup(name) })
+                .padding(horizontal = 4.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                Modifier.size(60.dp).clip(RoundedCornerShape(18.dp)).background(Color(0xFF1C1A17)).padding(7.dp)
-            ) {
-                Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
-                    if (name.equals("Links", true) && list.isEmpty()) vm.linkPinned.take(4).chunked(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { LinkIcon(vm, it, 21.dp) }
-                            if (row.size == 1) Spacer(Modifier.size(21.dp))
-                        }
-                    }
-                    // up to four little icons: installed apps first, then web apps
-                    val icons: List<@Composable () -> Unit> =
-                        list.take(4).map { a -> @Composable { AppIcon(vm, a, 21.dp) } } +
-                            vm.webLinksFor(name).take(4 - minOf(4, list.size)).map { w -> @Composable { WebIcon(vm, w, 21.dp) } }
-                    icons.chunked(2).forEach { row ->
-                        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                            row.forEach { it() }
-                            if (row.size == 1) Spacer(Modifier.size(21.dp))
-                        }
-                    }
-                }
-            }
-            Text(name, color = Dim, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(top = 5.dp))
+            Text(name, color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light, modifier = Modifier.weight(1f))
+            if (count > 0) Text("$count", color = Dim, fontSize = 14.sp)
         }
         if (name in vm.store.customGroups) DropdownMenu(menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Delete group (apps go back to automatic)") },
@@ -913,7 +898,7 @@ fun GroupScreen(vm: LauncherVM) {
             "To add a page: open it in Chrome › ⋮ › Add to home screen. Long-press a link to remove it.",
             color = Dim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
-        LazyVerticalGrid(GridCells.Fixed(4), Modifier.weight(1f).nestedScroll(gestures)) {
+        LazyVerticalGrid(GridCells.Fixed(5), Modifier.weight(1f).nestedScroll(gestures)) {
             if (isLinks) gridItems(vm.linkPinned, key = { "l" + it.pkg + it.id }) { p -> GridLink(vm, p) }
             gridItems(list, key = { it.key }) { a -> GridApp(vm, a) }
             gridItems(web, key = { "w" + it.url }) { w -> GridWeb(vm, w) }
@@ -930,13 +915,13 @@ private fun GridApp(vm: LauncherVM, a: AppEntry) {
     Box {
         Column(
             Modifier.fillMaxWidth().combinedClickable(onLongClick = { menu = true }, onClick = { vm.launch(a) })
-                .padding(vertical = 12.dp, horizontal = 4.dp),
+                .padding(vertical = 10.dp, horizontal = 2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            AppIcon(vm, a, 52.dp)
+            AppIcon(vm, a, 40.dp)
             Text(
                 a.label, color = Fg, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 5.dp)
             )
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
@@ -1010,13 +995,13 @@ private fun GridLink(vm: LauncherVM, p: Pinned) {
     Box {
         Column(
             Modifier.fillMaxWidth().combinedClickable(onLongClick = { menu = true }, onClick = { vm.launchPinned(p) })
-                .padding(vertical = 12.dp, horizontal = 4.dp),
+                .padding(vertical = 10.dp, horizontal = 2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            LinkIcon(vm, p, 52.dp)
+            LinkIcon(vm, p, 40.dp)
             Text(
                 p.label, color = Fg, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp)
+                textAlign = TextAlign.Center, modifier = Modifier.padding(top = 5.dp)
             )
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
@@ -1130,10 +1115,10 @@ fun WebIcon(vm: LauncherVM, w: WebApp, size: Dp) {
 @Composable
 private fun GridWeb(vm: LauncherVM, w: WebApp) {
     Column(
-        Modifier.fillMaxWidth().combinedClickable { vm.openWeb(w) }.padding(vertical = 12.dp, horizontal = 4.dp),
+        Modifier.fillMaxWidth().combinedClickable { vm.openWeb(w) }.padding(vertical = 10.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        WebIcon(vm, w, 52.dp)
+        WebIcon(vm, w, 40.dp)
         Text(
             w.label, color = Fg, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp)

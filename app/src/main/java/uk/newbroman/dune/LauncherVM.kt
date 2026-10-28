@@ -202,7 +202,16 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     fun openWeb(w: WebApp) = ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(w.url)))
 
     private var phrases by mutableStateOf<List<Phrase>>(emptyList())
-    var phraseOffset by mutableIntStateOf(0)
+    /** Moves on with "another", and by itself every third time the phone is woken (kept across restarts). */
+    var phraseOffset by mutableIntStateOf(ctx.getSharedPreferences("dune", 0).getInt("phraseOffset", 0))
+        private set
+    fun nextPhrase() { phraseOffset++; ctx.getSharedPreferences("dune", 0).edit().putInt("phraseOffset", phraseOffset).apply() }
+    fun phoneWoken() {
+        val p = ctx.getSharedPreferences("dune", 0)
+        val n = p.getInt("wakes", 0) + 1
+        p.edit().putInt("wakes", n % 3).apply()
+        if (n >= 3) nextPhrase()
+    }
     val phrase: Phrase? get() = Phrases.forDay(phrases, java.time.LocalDate.now(), phraseOffset)
 
     init {
@@ -393,6 +402,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     }
 
     /** Weawow if it's installed (tap on the weather), else null. */
+    val claudeApp: AppEntry? get() = apps.firstOrNull { it.pkg == CLAUDE }
+
     val weatherApp: AppEntry? get() = apps.firstOrNull { it.pkg == "com.weawow" || it.label.equals("weawow", true) }
 
     fun appByKey(key: String) = apps.firstOrNull { it.key == key }
