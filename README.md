@@ -5,6 +5,7 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 (online status, SSH, Termius, Wake-on-LAN, one-tap remote commands).
 
 ## Gestures
+- **Swipe right** – your app groups. **Swipe left** – your widgets. Home or Back returns to the middle.
 - **Swipe up** (or tap *apps*) – app list with search. Enter launches the top match; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
 - **Long-press** an app – favourite / hide / app info / uninstall. Long-press a favourite – reorder or remove.

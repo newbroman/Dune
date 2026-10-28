@@ -421,8 +421,11 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         resumeTick++
     }
 
-    /** Back button: never leaves the launcher. */
-    fun back() { if (screen != Screen.HOME) goHome() }
+    /** Which home page is showing: 0 groups, 1 home, 2 widgets. */
+    var homePage by mutableIntStateOf(1)
+
+    /** Back button: never leaves the launcher; from a side page it returns to the middle. */
+    fun back() { if (screen != Screen.HOME) goHome() else if (homePage != 1) resumeTick++ }
 
     fun onResume() {
         resumeTick++

@@ -40,6 +40,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -63,6 +65,8 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -158,9 +162,27 @@ fun HomeScreen(vm: LauncherVM) {
         val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME, vm.skyLat, vm.skyLon)
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
+    // Three pages: swipe right for Groups, left for Widgets; home in the middle.
+    val pager = rememberPagerState(initialPage = 1) { 3 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != 1) pager.animateScrollToPage(1) }
+    LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
+
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-        LazyColumn(
-            Modifier.weight(1f).fillMaxWidth().nestedScroll(gestures).padding(horizontal = 24.dp),
+      HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
+       when (page) {
+        0 -> SidePage("Groups", gestures) {
+            item { GroupsBlock(vm, title = false) }
+            item {
+                Text("Long-press any app › Move to group to change where it goes. Rules are in settings.",
+                    color = Faint, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
+            }
+        }
+        2 -> SidePage("Widgets", gestures) {
+            item { WidgetsBlock(vm) }
+        }
+        else -> LazyColumn(
+            Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
             state = listState,
         ) {
             if (!isDefault) item {
@@ -173,15 +195,22 @@ fun HomeScreen(vm: LauncherVM) {
             if (s.showAssistant.value) item { AssistantBlock(vm) }
             if (s.showPhrase.value) item { PhraseBlock(vm) }
             if (s.showWeather.value) item { WeatherBlock(vm) }
-            if (s.showWidgets.value) item { WidgetsBlock(vm) }
             if (s.showCoinbase.value && vm.coinbaseKey != null) item { CoinbaseBlock(vm) }
             if (s.showNotifs.value) item { NotificationsBlock(vm) }
             if (s.showTasks.value) item { TasksBlock(s) }
-            if (s.showGroups.value) item { GroupsBlock(vm) }
             if (s.showFavs.value) item { FavouritesBlock(vm) }
             if (s.showTermux.value) item { TermuxBlock(vm) }
             if (s.showL14.value) item { L14Block(vm) }
             item { Spacer(Modifier.height(32.dp)) }
+        }
+       }
+      }
+        // Page marker: groups · home · widgets (tap to jump)
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
+            listOf("groups", "•", "widgets").forEachIndexed { i, l ->
+                Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 12.sp,
+                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 12.dp, vertical = 4.dp))
+            }
         }
         Row(
             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 24.dp),
@@ -750,7 +779,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.14", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.15", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -798,11 +827,11 @@ fun AppIcon(vm: LauncherVM, a: AppEntry, size: Dp) {
 }
 
 @Composable
-private fun GroupsBlock(vm: LauncherVM) {
+private fun GroupsBlock(vm: LauncherVM, title: Boolean = true) {
     val groups = vm.groupNames.map { it to vm.appsIn(it) }
         .filter { (n, l) -> l.isNotEmpty() || n.equals("Links", true) || vm.webLinksFor(n).isNotEmpty() }
     if (groups.isEmpty()) return
-    Header("Groups")
+    if (title) Header("Groups")
     FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         groups.forEach { (name, list) -> GroupTile(vm, name, list) }
         // keep the last row left-aligned
@@ -1110,3 +1139,13 @@ private fun GridWeb(vm: LauncherVM, w: WebApp) {
 }
 
 
+
+/** A side page of the home screen: a heading and a scrolling list, over the sky. */
+@Composable
+private fun SidePage(title: String, gestures: NestedScrollConnection, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+    LazyColumn(Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp)) {
+        item { Text(title, color = Fg, fontSize = 30.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 36.dp, bottom = 12.dp)) }
+        content()
+        item { Spacer(Modifier.height(32.dp)) }
+    }
+}
