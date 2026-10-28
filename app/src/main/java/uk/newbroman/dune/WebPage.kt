@@ -57,10 +57,47 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
             }
         }
         loadUrl(home)
+        // Android's WebView can keep a page laid out at a stale height after a resize (typically
+        // after the keyboard closes), leaving the app squashed into the top of the view. After any
+        // size change, compare the page's idea of its height with the view's real height and, if
+        // they disagree, nudge it, then reload as a last resort (the web apps keep their state).
+        addOnLayoutChangeListener { _, _, top, _, bottom, _, oldTop, _, oldBottom ->
+            if (bottom - top != oldBottom - oldTop) {
+                main.removeCallbacks(heightCheck)
+                main.postDelayed(heightCheck, 450)
+            }
+        }
     }
 
+    private var lastReload = 0L
+    private val heightCheck = Runnable { checkHeight(nudged = false) }
+
+    private fun checkHeight(nudged: Boolean) {
+        val v = view
+        if (v.height < 200 || v.parent == null) return
+        val density = v.resources.displayMetrics.density
+        v.evaluateJavascript("window.innerHeight") { res ->
+            val inner = res?.trim('"')?.toFloatOrNull() ?: return@evaluateJavascript
+            val real = v.height / density
+            if (kotlin.math.abs(inner - real) / real < 0.12f) return@evaluateJavascript
+            if (!nudged) {
+                v.requestLayout(); v.evaluateJavascript("window.dispatchEvent(new Event('resize'))", null)
+                main.postDelayed({ checkHeight(nudged = true) }, 400)
+            } else if (System.currentTimeMillis() - lastReload > 5_000) {
+                lastReload = System.currentTimeMillis(); v.reload()
+            }
+        }
+    }
+
+
     /** Lift the WebView out of its old parent so Compose can re-attach it after a page change. */
-    fun detached(): WebView { (view.parent as? ViewGroup)?.removeView(view); return view }
+    fun detached(): WebView {
+        (view.parent as? ViewGroup)?.removeView(view)
+        // Fill whatever space Compose gives it; without this a WebView can measure itself to its
+        // content's height and the page collapses.
+        view.layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        return view
+    }
 
     private fun js(code: String) { main.post { view.evaluateJavascript(code, null) } }
     private fun q(s: String) = JSONObject.quote(s)
