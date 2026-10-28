@@ -854,11 +854,11 @@ private fun GroupRow(vm: LauncherVM, name: String, list: List<AppEntry>) {
         Row(
             Modifier.fillMaxWidth()
                 .combinedClickable(onLongClick = { menu = true }, onClick = { vm.showGroup(name) })
-                .padding(horizontal = 4.dp, vertical = 11.dp),
+                .padding(horizontal = 4.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(name, color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light, modifier = Modifier.weight(1f))
-            if (count > 0) Text("$count", color = Dim, fontSize = 14.sp)
+            Text(name, color = Fg, fontSize = 15.sp, fontWeight = FontWeight.Light, modifier = Modifier.weight(1f))
+            if (count > 0) Text("$count", color = Dim, fontSize = 11.sp)
         }
         if (name in vm.store.customGroups) DropdownMenu(menu, onDismissRequest = { menu = false }) {
             DropdownMenuItem(text = { Text("Delete group (apps go back to automatic)") },
