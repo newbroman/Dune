@@ -9,7 +9,7 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
   **Swipe left** – your widgets. Home or Back returns to the middle.
 - **Swipe up** (or tap *apps*) – app list with search. Enter launches the top match; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
-- **Long-press** an app – favourite / hide / app info / uninstall. Long-press a favourite – reorder or remove.
+- **Long-press** an app – favourite / hide / move or copy to another group / app info / uninstall. Long-press a favourite – reorder or remove.
 - Tap a task to tick it, long-press to delete. Tap a notification to open it, long-press to dismiss that app's.
 - Tap the clock for alarms, the date for the calendar, the weather to refresh, the L14 status to recheck.
 

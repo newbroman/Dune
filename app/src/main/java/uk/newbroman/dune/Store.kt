@@ -142,6 +142,7 @@ class Store private constructor(ctx: Context) {
     fun removeGroup(name: String) {
         customGroups = customGroups - name; writeList("customGroups", customGroups)
         saveOverrides(groupOverrides.filterValues { it != name })
+        saveCopies(groupCopies.mapValues { it.value - name }.filterValues { it.isNotEmpty() })
     }
     var groupOverrides by mutableStateOf(readOverrides())
         private set
@@ -155,6 +156,24 @@ class Store private constructor(ctx: Context) {
     private fun readOverrides(): Map<String, String> = try {
         val o = JSONObject(p.getString("groupOverrides", "{}") ?: "{}")
         o.keys().asSequence().associateWith { o.getString(it) }
+    } catch (e: Exception) { emptyMap() }
+
+    // Copies: an app can also appear in other groups as well as its own (app key -> extra groups)
+    var groupCopies by mutableStateOf(readCopies())
+        private set
+    fun toggleCopy(key: String, group: String) {
+        val now = groupCopies[key].orEmpty()
+        val next = if (group in now) now - group else now + group
+        saveCopies(if (next.isEmpty()) groupCopies - key else groupCopies + (key to next))
+    }
+    private fun saveCopies(m: Map<String, Set<String>>) {
+        groupCopies = m
+        val o = JSONObject(); m.forEach { (k, v) -> o.put(k, org.json.JSONArray(v.toList())) }
+        p.edit().putString("groupCopies", o.toString()).apply()
+    }
+    private fun readCopies(): Map<String, Set<String>> = try {
+        val o = JSONObject(p.getString("groupCopies", "{}") ?: "{}")
+        o.keys().asSequence().associateWith { k -> o.getJSONArray(k).let { a -> (0 until a.length()).map(a::getString).toSet() } }
     } catch (e: Exception) { emptyMap() }
 
     // Weather: blank = phone location

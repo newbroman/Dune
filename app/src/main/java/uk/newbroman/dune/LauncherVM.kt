@@ -291,7 +291,9 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         }
     }
     fun groupOf(a: AppEntry) = groupMap[a.key] ?: "Tools"
-    fun appsIn(g: String) = apps.filter { it.key !in store.hidden && groupOf(it) == g }
+    /** An app's own group, plus any group it has been copied into. */
+    fun appsIn(g: String) = apps.filter { it.key !in store.hidden && (groupOf(it) == g || g in store.groupCopies[it.key].orEmpty()) }
+    fun isCopyIn(a: AppEntry, g: String) = groupOf(a) != g && g in store.groupCopies[a.key].orEmpty()
 
     fun showGroup(g: String) { openGroup = g; screen = Screen.GROUP }
 

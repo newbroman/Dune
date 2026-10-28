@@ -536,7 +536,9 @@ private fun FavouritesBlock(vm: LauncherVM) {
                 DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; s.moveFavourite(a.key, -1) })
                 DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; s.moveFavourite(a.key, 1) })
                 DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(a.key) })
-                DropdownMenuItem(text = { Text("Move to group…") }, onClick = { menu = false; vm.moving = a })
+                DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
+            vm.openGroup?.let { g -> if (vm.isCopyIn(a, g)) DropdownMenuItem(text = { Text("Remove from this group") },
+                onClick = { menu = false; vm.store.toggleCopy(a.key, g) }) }
                 DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             }
         }
@@ -661,7 +663,7 @@ private fun AppRow(vm: LauncherVM, a: AppEntry) {
             vm.appShortcuts(a).forEach { sc ->
                 DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
             }
-            DropdownMenuItem(text = { Text("Move to group…  (${vm.groupOf(a)})") }, onClick = { menu = false; vm.moving = a })
+            DropdownMenuItem(text = { Text("Move or copy to group…  (${vm.groupOf(a)})") }, onClick = { menu = false; vm.moving = a })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
@@ -929,7 +931,9 @@ private fun GridApp(vm: LauncherVM, a: AppEntry) {
             if (menu) vm.appShortcuts(a).forEach { sc ->
                 DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
             }
-            DropdownMenuItem(text = { Text("Move to group…") }, onClick = { menu = false; vm.moving = a })
+            DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
+            vm.openGroup?.let { g -> if (vm.isCopyIn(a, g)) DropdownMenuItem(text = { Text("Remove from this group") },
+                onClick = { menu = false; vm.store.toggleCopy(a.key, g) }) }
             DropdownMenuItem(
                 text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
                 onClick = { menu = false; s.toggleFavourite(a.key) })
@@ -949,17 +953,27 @@ private fun MoveDialog(vm: LauncherVM, a: AppEntry) {
     val done = { vm.moving = null }
     AlertDialog(
         onDismissRequest = done,
-        title = { Text("Move ${a.label} to") },
+        title = { Text(a.label) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Tap a group to move it there; tap “copy” to show it in that group too.",
+                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+                val copies = vm.store.groupCopies[a.key].orEmpty()
                 vm.groupNames.forEach { g ->
-                    Text(
-                        if (g == current) "●  $g" else "○  $g",
-                        color = if (g == current) Sand else Fg, fontSize = 17.sp,
-                        modifier = Modifier.fillMaxWidth()
-                            .combinedClickable { vm.store.setGroup(a.key, g); done() }
-                            .padding(vertical = 9.dp)
-                    )
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (g == current) "●  $g" else "○  $g",
+                            color = if (g == current) Sand else Fg, fontSize = 17.sp,
+                            modifier = Modifier.weight(1f)
+                                .combinedClickable { vm.store.setGroup(a.key, g); done() }
+                                .padding(vertical = 9.dp)
+                        )
+                        if (g != current) {
+                            val on = g in copies
+                            Text(if (on) "✓ copy" else "+ copy", color = if (on) Sand else Dim, fontSize = 14.sp,
+                                modifier = Modifier.combinedClickable { vm.store.toggleCopy(a.key, g) }.padding(9.dp))
+                        }
+                    }
                 }
                 OutlinedTextField(
                     value = newName, onValueChange = { newName = it }, singleLine = true,
@@ -976,7 +990,7 @@ private fun MoveDialog(vm: LauncherVM, a: AppEntry) {
             TextButton(onClick = {
                 if (newName.isNotBlank()) { vm.store.addGroup(newName); vm.store.setGroup(a.key, newName.trim()) }
                 done()
-            }) { Text(if (newName.isNotBlank()) "Create" else "Close") }
+            }) { Text(if (newName.isNotBlank()) "Create" else "Done") }
         },
     )
 }
