@@ -371,9 +371,16 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         return true
     }
 
-    /** First run: Google News, Weawow and Claude, if they're installed. */
+    /**
+     * First run of this version: Google News, Weawow and Claude go to the top of the favourites
+     * (and anything that was in the short-lived dock moves there too).
+     */
     private fun seedDock() {
-        if (store.dockSeeded.value || apps.isEmpty()) return
+        if (apps.isEmpty()) return
+        if (store.dock.isNotEmpty()) {
+            store.saveFavourites(store.dock + store.favourites.filterNot { it in store.dock }); store.saveDock(emptyList())
+        }
+        if (store.dockSeeded.value) return
         val wanted = listOf(
             listOf("com.google.android.apps.magazines") to "google news",
             listOf("com.weawow") to "weawow",
@@ -382,10 +389,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         val keys = wanted.mapNotNull { (pkgs, label) ->
             (apps.firstOrNull { it.pkg in pkgs } ?: apps.firstOrNull { it.label.equals(label, true) })?.key
         }
-        store.saveDock(keys); store.dockSeeded.set(true)
+        store.saveFavourites(keys + store.favourites.filterNot { it in keys }); store.dockSeeded.set(true)
     }
-
-    val dockApps: List<AppEntry> get() = store.dock.mapNotNull { appByKey(it) }
 
     /** Weawow if it's installed (tap on the weather), else null. */
     val weatherApp: AppEntry? get() = apps.firstOrNull { it.pkg == "com.weawow" || it.label.equals("weawow", true) }

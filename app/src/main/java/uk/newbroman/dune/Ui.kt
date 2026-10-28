@@ -180,7 +180,6 @@ fun HomeScreen(vm: LauncherVM) {
             if (s.showL14.value) item { L14Block(vm) }
             item { Spacer(Modifier.height(32.dp)) }
         }
-        if (vm.dockApps.isNotEmpty()) Dock(vm)
         Row(
             Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 24.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -620,8 +619,6 @@ private fun AppRow(vm: LauncherVM, a: AppEntry) {
                 DropdownMenuItem(text = { Text("› " + (sc.shortLabel ?: "")) }, onClick = { menu = false; vm.launchShortcutInfo(sc) })
             }
             DropdownMenuItem(text = { Text("Move to group…  (${vm.groupOf(a)})") }, onClick = { menu = false; vm.moving = a })
-            DropdownMenuItem(text = { Text(if (a.key in s.dock) "Remove from dock" else "Add to dock") },
-                onClick = { menu = false; s.toggleDock(a.key) })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
@@ -748,7 +745,7 @@ fun SettingsScreen(vm: LauncherVM) {
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.12", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            Text("Dune 1.13", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
     }
 }
@@ -913,8 +910,6 @@ private fun GridApp(vm: LauncherVM, a: AppEntry) {
             DropdownMenuItem(
                 text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
                 onClick = { menu = false; s.toggleFavourite(a.key) })
-            DropdownMenuItem(text = { Text(if (a.key in s.dock) "Remove from dock" else "Add to dock") },
-                onClick = { menu = false; s.toggleDock(a.key) })
             DropdownMenuItem(text = { Text("Hide") }, onClick = { menu = false; s.setHidden(a.key, true) })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
             DropdownMenuItem(text = { Text("Uninstall") }, onClick = {
@@ -1109,29 +1104,4 @@ private fun GridWeb(vm: LauncherVM, w: WebApp) {
     }
 }
 
-/** The handful of apps you open most, one tap from the home screen. Long-press to rearrange. */
-@Composable
-private fun Dock(vm: LauncherVM) {
-    val s = vm.store
-    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-        vm.dockApps.forEach { a ->
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                Column(
-                    Modifier.width(76.dp).combinedClickable(onLongClick = { menu = true }, onClick = { vm.launch(a) })
-                        .padding(vertical = 6.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    AppIcon(vm, a, 46.dp)
-                    Text(a.label, color = Dim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 4.dp))
-                }
-                DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Move left") }, onClick = { menu = false; s.moveDock(a.key, -1) })
-                    DropdownMenuItem(text = { Text("Move right") }, onClick = { menu = false; s.moveDock(a.key, 1) })
-                    DropdownMenuItem(text = { Text("Remove from dock") }, onClick = { menu = false; s.toggleDock(a.key) })
-                }
-            }
-        }
-    }
-}
+
