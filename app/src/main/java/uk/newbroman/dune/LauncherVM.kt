@@ -32,7 +32,7 @@ data class AppEntry(
     val key get() = "$pkg/$cls/$serial"
 }
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
@@ -199,7 +199,11 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun openWeb(w: WebApp) = ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(w.url)))
+    /** Rozmowa opens full screen inside Dune (with the mic working); other web apps open in the browser. */
+    fun openWeb(w: WebApp) {
+        if (sameSite(w.url, SpeechWebView.ROZMOWA)) { screen = Screen.ROZMOWA; return }
+        ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(w.url)))
+    }
 
     private var phrases by mutableStateOf<List<Phrase>>(emptyList())
     /** Moves on with "another", and by itself every third time the phone is woken (kept across restarts). */

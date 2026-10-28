@@ -121,6 +121,7 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.GROUP -> GroupScreen(vm)
                     Screen.DRIVE -> DriveScreen(vm)
                     Screen.WIDGET_PICK -> WidgetPickerScreen(vm)
+                    Screen.ROZMOWA -> RozmowaFull()
                 }
             }
             vm.moving?.let { MoveDialog(vm, it) }
@@ -173,7 +174,7 @@ fun HomeScreen(vm: LauncherVM) {
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
       HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
        when (page) {
-        0 -> RozmowaPage()
+        0 -> RozmowaPage(vm)
         1 -> SidePage("Groups", gestures) {
             item { GroupsBlock(vm, title = false) }
             item {
@@ -1140,9 +1141,19 @@ private fun SidePage(title: String, gestures: NestedScrollConnection, content: a
 
 const val HOME_PAGE = 2
 
+/** Rozmowa on its own, filling the screen like an app: no browser bar, conversation kept. Back returns home. */
+@Composable
+private fun RozmowaFull() {
+    val act = LocalContext.current as MainActivity
+    AndroidView(
+        factory = { act.rozmowa().detached() },
+        modifier = Modifier.fillMaxSize().background(Bg).systemBarsPadding().imePadding(),
+    )
+}
+
 /** Rozmowa, Martin's Polish conversation app, running inside Dune with the mic and voice working. */
 @Composable
-private fun RozmowaPage() {
+private fun RozmowaPage(vm: LauncherVM) {
     val act = LocalContext.current as MainActivity
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1150,8 +1161,8 @@ private fun RozmowaPage() {
             Spacer(Modifier.weight(1f))
             Text("reload", color = Dim, fontSize = 13.sp,
                 modifier = Modifier.combinedClickable { act.rozmowa().view.reload() }.padding(10.dp))
-            Text("full screen ↗", color = Dim, fontSize = 13.sp,
-                modifier = Modifier.combinedClickable { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(SpeechWebView.ROZMOWA))) }.padding(10.dp))
+            Text("full screen", color = Dim, fontSize = 13.sp,
+                modifier = Modifier.combinedClickable { vm.screen = Screen.ROZMOWA }.padding(10.dp))
         }
         AndroidView(
             factory = { act.rozmowa().detached() },

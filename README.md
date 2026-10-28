@@ -5,7 +5,7 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 (online status, SSH, Termius, Wake-on-LAN, one-tap remote commands).
 
 ## Gestures
-- **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice.
+- **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice (*full screen* opens it on its own, like an app; so does tapping it in My apps or Languages).
   **Swipe left** – your widgets. Home or Back returns to the middle.
 - **Swipe up** (or tap *apps*) – app list with search. Enter launches the top match; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
