@@ -267,6 +267,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             }
             icons.clear(); iconLoading.clear()
             seedDock()
+            seedCallsAndCamera()
         }
     }
 
@@ -405,6 +406,25 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             (apps.firstOrNull { it.pkg in pkgs } ?: apps.firstOrNull { it.label.equals(label, true) })?.key
         }
         store.saveFavourites(keys + store.favourites.filterNot { it in keys }); store.dockSeeded.set(true)
+    }
+
+    /** Once: add the camera, phone and WhatsApp to the end of the favourites. */
+    private fun seedCallsAndCamera() {
+        if (apps.isEmpty() || store.favSeeded2.value) return
+        val pm = ctx.packageManager
+        fun handler(i: android.content.Intent) =
+            runCatching { pm.resolveActivity(i, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName }.getOrNull()
+                ?.takeIf { it != "android" }
+        val pkgs = listOfNotNull(
+            handler(android.content.Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)),
+            handler(android.content.Intent(android.content.Intent.ACTION_DIAL)),
+            "com.whatsapp",
+        )
+        val byLabel = listOf("camera", "phone", "whatsapp")
+        val keys = (pkgs.mapNotNull { p -> apps.firstOrNull { it.pkg == p }?.key } +
+            byLabel.mapNotNull { l -> apps.firstOrNull { it.label.equals(l, true) }?.key }).distinct()
+        store.saveFavourites(store.favourites + keys.filterNot { it in store.favourites })
+        store.favSeeded2.set(true)
     }
 
     /** Weawow if it's installed (tap on the weather), else null. */

@@ -178,7 +178,7 @@ fun HomeScreen(vm: LauncherVM) {
         1 -> SidePage("Groups", gestures) {
             item { GroupsBlock(vm, title = false) }
             item {
-                Text("Long-press any app › Move to group to change where it goes. Rules are in settings.",
+                Text("Long-press any app › Move or copy to group to change where it goes. Rules are in settings.",
                     color = Faint, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
             }
         }
@@ -513,34 +513,40 @@ private fun TasksBlock(s: Store) {
 @Composable
 private fun FavouritesBlock(vm: LauncherVM) {
     val s = vm.store
-    Header("Favourites")
     val favs = s.favourites.mapNotNull { vm.appByKey(it) }
     if (favs.isEmpty()) {
+        Header("Favourites")
         Text("Long-press an app in the app list to pin it here", color = Faint, fontSize = 15.sp)
         return
     }
-    favs.forEach { a ->
-        var menu by remember { mutableStateOf(false) }
-        Box {
-            Row(
-                Modifier.fillMaxWidth()
-                    .combinedClickable(onLongClick = { menu = true }, onClick = { vm.launch(a) })
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                AppIcon(vm, a, 34.dp)
-                Spacer(Modifier.width(14.dp))
-                Text(a.label, color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light)
+    // Icons only, five to a row
+    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+        favs.chunked(5).forEach { row ->
+            Row(Modifier.fillMaxWidth()) {
+                row.forEach { a -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { FavIcon(vm, a) } }
+                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
             }
-            DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Move up") }, onClick = { menu = false; s.moveFavourite(a.key, -1) })
-                DropdownMenuItem(text = { Text("Move down") }, onClick = { menu = false; s.moveFavourite(a.key, 1) })
-                DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(a.key) })
-                DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
-            vm.openGroup?.let { g -> if (vm.isCopyIn(a, g)) DropdownMenuItem(text = { Text("Remove from this group") },
-                onClick = { menu = false; vm.store.toggleCopy(a.key, g) }) }
-                DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
-            }
+        }
+    }
+}
+
+@Composable
+private fun FavIcon(vm: LauncherVM, a: AppEntry) {
+    val s = vm.store
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.clip(RoundedCornerShape(14.dp))
+                .combinedClickable(onLongClick = { menu = true }, onClick = { vm.launch(a) })
+                .padding(8.dp)
+        ) { AppIcon(vm, a, 50.dp) }
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            Text(a.label, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            DropdownMenuItem(text = { Text("Move left") }, onClick = { menu = false; s.moveFavourite(a.key, -1) })
+            DropdownMenuItem(text = { Text("Move right") }, onClick = { menu = false; s.moveFavourite(a.key, 1) })
+            DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(a.key) })
+            DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
+            DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
         }
     }
 }
@@ -778,7 +784,7 @@ fun SettingsScreen(vm: LauncherVM) {
 
         item { Header("Groups") }
         item {
-            Note("Apps are sorted automatically; long-press any app › Move to group to change one. " +
+            Note("Apps are sorted automatically; long-press any app › Move or copy to group to change one. " +
                 "Rules, one group per line:  Name | keywords. First match wins. Keywords match the start of a word in the app's name; " +
                 "=name matches exactly; a.b.c is a package; @web:site matches installed web apps; @cat:game uses Android's category.")
             Field("Group rules", s.groupRules, multi = true)

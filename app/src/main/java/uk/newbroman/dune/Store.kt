@@ -91,6 +91,7 @@ class Store private constructor(ctx: Context) {
     var dock by mutableStateOf(readList("dock"))
         private set
     val dockSeeded = Flag("dockSeeded", false)
+    val favSeeded2 = Flag("favSeeded2", false)
     fun saveDock(l: List<String>) { dock = l.distinct().take(5); writeList("dock", dock) }
     fun toggleDock(key: String) = saveDock(if (key in dock) dock - key else dock + key)
     fun moveDock(key: String, by: Int) {
