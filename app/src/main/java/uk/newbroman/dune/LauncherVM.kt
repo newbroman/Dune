@@ -32,6 +32,9 @@ data class AppEntry(
     val key get() = "$pkg/$cls/$serial"
 }
 
+const val PORTFOLIO = "https://newbroman.github.io/"
+val PORTFOLIO_APP = WebApp("My GitHub apps", PORTFOLIO, "")
+
 enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
@@ -184,6 +187,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         return webIcons[w.url] ?: WebApps.icon(ctx, w)?.also { webIcons[w.url] = it }
     }
 
+    /** Web pages can be favourites too, stored as "web:<url>". */
+    fun favWeb(key: String): WebApp? {
+        if (!key.startsWith("web:")) return null
+        val url = key.removePrefix("web:")
+        return webApps.firstOrNull { sameSite(it.url, url) }
+            ?: if (sameSite(url, PORTFOLIO)) PORTFOLIO_APP else WebApp(url.substringAfter("//").trimEnd('/'), url, "")
+    }
+
     private fun sameSite(a: String, b: String) = a.trimEnd('/').equals(b.trimEnd('/'), true)
 
     /** Portfolio apps shown in [group] (My apps: all; Languages: the language shelves), minus any already installed. */
@@ -224,7 +235,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         Drive.init(app)
         viewModelScope.launch {
             webApps = WebApps.all(app)
-            WebApps.ensureIcons(app, webApps); webIcons.clear(); webIconsVersion++
+            WebApps.ensureIcons(app, webApps + PORTFOLIO_APP); webIcons.clear(); webIconsVersion++
             if (WebApps.refresh(app)) { webApps = WebApps.all(app); webIcons.clear(); webIconsVersion++ }
         }
         viewModelScope.launch {
@@ -268,6 +279,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             icons.clear(); iconLoading.clear()
             seedDock()
             seedCallsAndCamera()
+            seedPortfolio()
         }
     }
 
@@ -425,6 +437,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             byLabel.mapNotNull { l -> apps.firstOrNull { it.label.equals(l, true) }?.key }).distinct()
         store.saveFavourites(store.favourites + keys.filterNot { it in store.favourites })
         store.favSeeded2.set(true)
+    }
+
+    /** Once: a link to Martin's GitHub app page among the favourites. */
+    private fun seedPortfolio() {
+        if (store.favSeeded3.value) return
+        val k = "web:$PORTFOLIO"
+        if (k !in store.favourites) store.saveFavourites(store.favourites + k)
+        store.favSeeded3.set(true)
     }
 
     /** Weawow if it's installed (tap on the weather), else null. */

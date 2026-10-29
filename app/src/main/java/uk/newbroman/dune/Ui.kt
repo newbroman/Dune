@@ -513,7 +513,8 @@ private fun TasksBlock(s: Store) {
 @Composable
 private fun FavouritesBlock(vm: LauncherVM) {
     val s = vm.store
-    val favs = s.favourites.mapNotNull { vm.appByKey(it) }
+    // apps and web pages ("web:<url>") side by side
+    val favs: List<Any> = s.favourites.mapNotNull { k -> vm.appByKey(k) ?: vm.favWeb(k) }
     if (favs.isEmpty()) {
         Header("Favourites")
         Text("Long-press an app in the app list to pin it here", color = Faint, fontSize = 15.sp)
@@ -523,7 +524,9 @@ private fun FavouritesBlock(vm: LauncherVM) {
     Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
         favs.chunked(5).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
-                row.forEach { a -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { FavIcon(vm, a) } }
+                row.forEach { f -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    if (f is AppEntry) FavIcon(vm, f) else FavWebIcon(vm, f as WebApp)
+                } }
                 repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
@@ -547,6 +550,26 @@ private fun FavIcon(vm: LauncherVM, a: AppEntry) {
             DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(a.key) })
             DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
+        }
+    }
+}
+
+@Composable
+private fun FavWebIcon(vm: LauncherVM, w: WebApp) {
+    val s = vm.store
+    val key = "web:" + w.url
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.clip(RoundedCornerShape(14.dp))
+                .combinedClickable(onLongClick = { menu = true }, onClick = { vm.openWeb(w) })
+                .padding(8.dp)
+        ) { WebIcon(vm, w, 50.dp) }
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            Text(w.label, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            DropdownMenuItem(text = { Text("Move left") }, onClick = { menu = false; s.moveFavourite(key, -1) })
+            DropdownMenuItem(text = { Text("Move right") }, onClick = { menu = false; s.moveFavourite(key, 1) })
+            DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(key) })
         }
     }
 }
@@ -1135,8 +1158,16 @@ fun WebIcon(vm: LauncherVM, w: WebApp, size: Dp) {
 
 @Composable
 private fun GridWeb(vm: LauncherVM, w: WebApp) {
+    val key = "web:" + w.url
+    val fav = key in vm.store.favourites
+    var menu by remember { mutableStateOf(false) }
+    Box {
+    DropdownMenu(menu, onDismissRequest = { menu = false }) {
+        DropdownMenuItem(text = { Text(if (fav) "Remove from favourites" else "Add to favourites") },
+            onClick = { menu = false; vm.store.toggleFavourite(key) })
+    }
     Column(
-        Modifier.fillMaxWidth().combinedClickable { vm.openWeb(w) }.padding(vertical = 10.dp, horizontal = 2.dp),
+        Modifier.fillMaxWidth().combinedClickable(onLongClick = { menu = true }) { vm.openWeb(w) }.padding(vertical = 10.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         WebIcon(vm, w, 40.dp)
@@ -1144,6 +1175,7 @@ private fun GridWeb(vm: LauncherVM, w: WebApp) {
             w.label, color = Fg, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center, lineHeight = 14.sp, modifier = Modifier.padding(top = 6.dp)
         )
+    }
     }
 }
 
