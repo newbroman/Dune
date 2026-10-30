@@ -772,6 +772,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Start automatically in the car", s.driveAuto) }
         item { Toggle("Read new messages aloud", s.driveReadAloud) }
         item { Toggle("Landscape Drive screen", s.driveLandscape) }
+        item { WakeWordSettings(vm) }
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
@@ -834,6 +835,40 @@ private fun LinkRow(label: String, onClick: () -> Unit) = Text(
 
 @Composable
 private fun Note(text: String) = Text(text, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+
+/** "OK Computer": setting up the offline wake word for Drive mode. */
+@Composable
+private fun WakeWordSettings(vm: LauncherVM) {
+    val act = LocalContext.current as MainActivity
+    val scope = rememberCoroutineScope()
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(vm.resumeTick) { tick++ }
+    val p = act.getSharedPreferences("dune", 0)
+    var on by remember { mutableStateOf(WakeWord.enabled(act)) }
+    val model = remember(tick, WakeWord.status) { WakeWord.hasModel(act) }
+    val mic = remember(tick) { WakeWord.hasMic(act) }
+    val popUp = remember(tick) { WakeWord.canPopUp(act) }
+    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth().combinedClickable {
+            on = !on; p.edit().putBoolean("wakeWord", on).apply(); WakeWord.sync(act)
+        }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Wake word “${WakeWord.PHRASE}” in Drive mode", color = Fg, fontSize = 17.sp, modifier = Modifier.weight(1f))
+            Switch(checked = on, onCheckedChange = null)
+        }
+        if (on) {
+            Note("Say “OK Computer”, then your command, as if you'd tapped Speak. It listens offline and only in Drive mode.")
+            if (!model) LinkRow("1. Download the speech model (about 40 MB)") {
+                scope.launch { WakeWord.download(act); tick++; WakeWord.sync(act) }
+            } else Note("✓ Speech model ready")
+            if (!mic) LinkRow("2. Allow the microphone") { act.requestPerm(android.Manifest.permission.RECORD_AUDIO) { tick++; WakeWord.sync(act) } }
+            else Note("✓ Microphone allowed")
+            if (!popUp) LinkRow("3. Allow “Display over other apps” (so it works over Maps)") {
+                act.tryStart(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + act.packageName)))
+            } else Note("✓ Can open over other apps")
+            if (WakeWord.status.isNotBlank() && WakeWord.status != "Ready") Note(WakeWord.status)
+        }
+    }
+}
 
 @Composable
 private fun Toggle(label: String, f: Store.Flag) {

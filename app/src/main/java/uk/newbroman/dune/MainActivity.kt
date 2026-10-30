@@ -50,12 +50,13 @@ class MainActivity : ComponentActivity() {
 
     /** Ask Android's speech recogniser for one phrase. */
     fun listen(prompt: String, cb: (String?) -> Unit) {
-        listenCallback = cb
+        WakeWord.pause(this)
+        listenCallback = { r -> cb(r); WakeWord.resume(this) }
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
             .putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
-        try { speechLauncher.launch(i) } catch (e: Exception) { listenCallback = null; toast("Speech recognition isn't available") }
+        try { speechLauncher.launch(i) } catch (e: Exception) { listenCallback = null; WakeWord.resume(this); toast("Speech recognition isn't available") }
     }
 
     /** Run a typed or spoken request; in Drive mode the answer is spoken too. */
@@ -176,7 +177,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         widgetHost = AppWidgetHost(applicationContext, WIDGET_HOST_ID)
-        if (savedInstanceState == null && intent?.getBooleanExtra("drive", false) == true) {
+        if (savedInstanceState == null && intent != null && !voiceIntent(intent) && intent.getBooleanExtra("drive", false)) {
             intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE
         }
         onBackPressedDispatcher.addCallback(this) { vm.back() }
@@ -186,8 +187,20 @@ class MainActivity : ComponentActivity() {
     /** Pressing Home while already home returns to the top of the home screen. */
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (voiceIntent(intent)) return
         if (intent.getBooleanExtra("drive", false)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
         else vm.goHome()
+    }
+
+    /** "OK Computer" was heard, or a car / headset voice button was pressed: open the Speak prompt. */
+    private fun voiceIntent(intent: Intent): Boolean {
+        val wake = intent.getBooleanExtra("wake", false)
+        if (!wake && intent.action != Intent.ACTION_VOICE_COMMAND) return false
+        intent.removeExtra("wake"); intent.removeExtra("drive")
+        if (wake || Drive.active.value) { Drive.set(this, true); vm.screen = Screen.DRIVE }
+        Speaker.stop()
+        window.decorView.postDelayed({ listen("Listening…") { it?.let { t -> handleAsk(t, speak = true) } } }, 250)
+        return true
     }
 
     override fun onResume() {

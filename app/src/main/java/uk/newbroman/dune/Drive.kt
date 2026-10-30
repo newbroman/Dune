@@ -84,6 +84,7 @@ object Drive {
     fun set(ctx: Context, on: Boolean) {
         active.value = on
         ctx.getSharedPreferences("dune", Context.MODE_PRIVATE).edit().putBoolean("driveActive", on).apply()
+        WakeWord.sync(ctx)
         if (!on) {
             ctx.getSystemService(NotificationManager::class.java)?.cancel(NOTIF_ID)
             Speaker.stop()
@@ -242,6 +243,7 @@ fun DriveScreen(vm: LauncherVM) {
         act.requestedOrientation = if (landscapeWanted) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             else ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         media.start()
+        WakeWord.sync(act)   // starting the microphone needs Dune on screen, so (re)try here
         onDispose {
             act.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED

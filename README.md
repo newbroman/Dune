@@ -30,6 +30,10 @@ Big buttons for Home, Navigate…, Spotify, BBC Sounds, Spheres and Messages; pl
 new messages are read aloud; *Reply* takes your answer by voice, reads it back and sends it after a few seconds unless
 you cancel. The 🎤 Speak button takes any command above plus "read my messages", "reply …", "pause", "skip".
 
+**Hands-free:** turn on *Wake word “OK Computer”* (Settings › Drive mode) and say "OK Computer" instead of tapping
+Speak. It listens with [Vosk](https://alphacephei.com/vosk/), entirely offline, and only while Drive mode is on (a
+notification shows when it is listening). A car or headset voice button can also open Speak: pick Dune if asked.
+
 ## Phone setup
 1. Install the APK (from Releases, or over USB with `adb install -r Dune.apk`) (allow "install unknown apps" for your file manager/browser when asked).
 2. Open Dune › tap "Make Dune your home app" › pick Dune.

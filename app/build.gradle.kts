@@ -14,8 +14,10 @@ android {
         applicationId = "uk.newbroman.dune"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.24"
+        versionCode = 27
+        versionName = "1.25"
+        // phones only: keeps the wake-word engine's native code from tripling the APK
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     // Release key is NOT in git. Locally it comes from keystore.properties (next to this
@@ -60,6 +62,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.webkit:webkit:1.12.1")
+    // offline wake word ("OK Computer")
+    implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    implementation("net.java.dev.jna:jna:5.13.0@aar")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
 }
