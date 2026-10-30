@@ -592,12 +592,7 @@ private fun L14Block(vm: LauncherVM) {
     val act = LocalContext.current as Activity
     val s = vm.store
     val host = s.l14Host.value.trim()
-    val status = when {
-        host.isEmpty() -> null
-        vm.l14Online == true -> "● online"
-        vm.l14Online == false -> "○ offline"
-        else -> "· checking"
-    }
+    val status = if (host.isEmpty()) null else l14Summary(vm.l14Online, vm.l14Status)
     Header("L14", status) { vm.checkL14() }
     if (host.isEmpty()) {
         Text(
@@ -606,6 +601,7 @@ private fun L14Block(vm: LauncherVM) {
         )
         return
     }
+    L14Warnings(vm)
     val hasTermius = remember(vm.resumeTick) { act.isInstalled(TERMIUS) }
     FlowRow {
         val sc = vm.l14Shortcut
@@ -614,6 +610,46 @@ private fun L14Block(vm: LauncherVM) {
         if (s.l14Mac.value.isNotBlank()) Chip("Wake") { vm.wakeL14() }
         parseShortcuts(s.l14Lines.value).forEach { sc ->
             Chip(sc.label) { Actions.termux(act, Actions.sshCommand(s, sc.command)) }
+        }
+    }
+}
+
+private val L14Fail = Color(0xFFE0806A)
+
+/** The L14's problems under its header; tap to show every check, tap again to hide them. */
+@Composable
+private fun L14Warnings(vm: LauncherVM) {
+    val st = vm.l14Status
+    vm.l14StatusErr?.let { Text(it, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp)) }
+    if (st == null) return
+    val stale = vm.l14Online != true
+    val asOf = remember(st.receivedAt) {
+        java.text.SimpleDateFormat("EEE HH:mm", Locale.UK).format(java.util.Date(st.receivedAt))
+    }
+    val shown = if (vm.l14ShowAll) st.items else st.problems
+    Column(Modifier.combinedClickable { vm.l14ShowAll = !vm.l14ShowAll }.padding(bottom = 8.dp)) {
+        if (stale) Text("Last report $asOf:", color = Dim, fontSize = 13.sp)
+        if (shown.isEmpty()) {
+            Text("All checks OK  ·  tap for details", color = Dim, fontSize = 13.sp)
+        }
+        var group = ""
+        shown.forEach { i ->
+            if (vm.l14ShowAll && i.group != group) {
+                group = i.group
+                Text(group, color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+            val (mark, colour) = when (i.level) {
+                "fail" -> "✕" to L14Fail
+                "warn" -> "!" to Sand
+                "ok" -> "✓" to Dim
+                else -> "·" to Dim
+            }
+            Text(
+                "$mark  ${i.name}: ${i.detail}",
+                color = if (stale && i.isProblem) colour.copy(alpha = 0.6f) else colour,
+                fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 1.dp)
+            )
         }
     }
 }
@@ -801,6 +837,12 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Field("User", s.l14User) }
         item { Field("SSH port", s.l14Port, number = true) }
         item { Field("MAC address for Wake (optional)", s.l14Mac) }
+        item {
+            Note("Warnings (backups, services, disk, NRG jobs) come from l14-status on the L14. " +
+                "Get its token on the L14 with:  l14-status.py token   Leave the token blank to turn warnings off.")
+            Field("Status port", s.l14StatusPort, number = true)
+            Field("Status token", s.l14StatusToken)
+        }
         item {
             Note("Commands run on the L14 over SSH, one per line:  Label | command")
             Field("L14 commands", s.l14Lines, multi = true)

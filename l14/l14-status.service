@@ -1,0 +1,13 @@
+[Unit]
+Description=L14 status for the Dune launcher (token-protected, TCP 8714)
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/bin/l14-status.py serve
+Restart=on-failure
+RestartSec=20
+Nice=10
+
+[Install]
+WantedBy=default.target

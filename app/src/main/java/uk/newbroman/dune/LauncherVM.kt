@@ -116,6 +116,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         private set
     var l14Online by mutableStateOf<Boolean?>(null)
         private set
+    /** Last report from l14-status.py; kept (shown as "as of") while the L14 is offline. */
+    var l14Status by mutableStateOf<L14Status?>(null)
+        private set
+    /** Why the last status fetch failed while the L14 itself was reachable, else null. */
+    var l14StatusErr by mutableStateOf<String?>(null)
+        private set
+    /** Tap the warnings line to show every check, not just the problems. */
+    var l14ShowAll by mutableStateOf(false)
     /** Bumped on resume / home press so screens can re-read system state and scroll to top. */
     var resumeTick by mutableIntStateOf(0)
         private set
@@ -527,7 +535,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         val port = store.l14Port.value.trim().toIntOrNull() ?: 22
         l14Job?.cancel()
         l14Job = viewModelScope.launch {
-            l14Online = Actions.reachable(host, port)
+            val online = Actions.reachable(host, port)
+            l14Online = online
+            val token = store.l14StatusToken.value.trim()
+            if (!online || token.isEmpty()) { l14StatusErr = null; return@launch }
+            val sport = store.l14StatusPort.value.trim().toIntOrNull() ?: 8714
+            L14Status.fetch(host, sport, token)
+                .onSuccess { l14Status = it; l14StatusErr = null }
+                .onFailure { l14StatusErr = "status: " + (it.message ?: "no answer").take(60) }
         }
     }
 

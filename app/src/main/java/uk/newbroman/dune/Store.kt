@@ -195,6 +195,9 @@ class Store private constructor(ctx: Context) {
     val l14Host = Str("l14Host", "")
     val l14Port = Str("l14Port", "22")
     val l14Mac = Str("l14Mac", "")
+    /** l14-status.py on the L14: its port and token (`l14-status.py token`). Blank token = no warnings. */
+    val l14StatusPort = Str("l14StatusPort", "8714")
+    val l14StatusToken = Str("l14StatusToken", "")
     val l14Lines = Str(
         "l14Lines",
         """

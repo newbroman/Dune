@@ -2,7 +2,8 @@
 
 Black, text-only home screen with: clock and date, weather (Open-Meteo, no API key),
 notifications grouped by app, a task list, favourite apps, Termux shortcuts, and an L14 panel
-(online status, SSH, Termius, Wake-on-LAN, one-tap remote commands).
+(online status, warnings about its backups, services, disk and NRG jobs, SSH, Termius, Wake-on-LAN,
+one-tap remote commands).
 
 ## Gestures
 - **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice (*full screen* opens it on its own, like an app; so does tapping it in My apps or Languages).
@@ -13,6 +14,7 @@ notifications grouped by app, a task list, favourite apps, Termux shortcuts, and
 - **Long-press** an app – favourite / hide / move or copy to another group / app info / uninstall. Long-press a favourite – reorder or remove.
 - Tap a task to tick it, long-press to delete. Tap a notification to open it, long-press to dismiss that app's.
 - Tap the clock for alarms, the date for the calendar, the weather to refresh, the L14 status to recheck.
+  Tap the L14's warnings to see every check, tap again to go back to just the problems.
 
 ## Home screen extras
 - **Polish clock** – the date in Polish and the time in words (*osiemnasta czterdzieści jeden*). Tap to hear it.
@@ -57,6 +59,21 @@ hostname -I                      # the IP to put in Dune settings
 ip link | grep -A1 -E "^[0-9]+: (en|eth)"   # MAC (link/ether) of the wired port, for Wake
 ```
 Wake-on-LAN only works over a wired connection with WoL enabled in the BIOS.
+
+### L14 warnings (once, on the laptop)
+The L14 panel lists what needs attention on the L14: backups (nightly USB, weekly Drive, the Drive copy,
+USB drive plugged in), services (Drive mount, hydrobot, NRG ship watcher, failed units, Claude Remote
+Control), the machine (disk space, on battery, updates, restart needed) and NRG jobs (last ship, report
+PDF older than its sources, Water Watch overdue, dashboard publish), plus the slow findings of the
+daily `l14-health` check. It comes from `l14/l14-status.py`, a small read-only service on the L14:
+```
+curl -fsSL https://raw.githubusercontent.com/newbroman/Dune/main/l14/install.sh | bash
+```
+It prints the address, port and token to put in Dune › Settings › L14. To see the phone's warnings
+away from home, put [Tailscale](https://tailscale.com) on the L14 and the phone and use the L14's
+Tailscale address (100.x.y.z) as its address in Dune; no router ports are opened. The service answers
+only localhost, home-network and Tailscale addresses, and only with the right token. Run
+`l14-status.py` on the L14 to see the same checks in the terminal.
 
 ## Building
 `./gradlew assembleRelease` (JDK 17+, Android SDK 35). Every push to `main` builds the APK on
