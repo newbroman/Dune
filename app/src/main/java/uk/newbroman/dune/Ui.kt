@@ -602,6 +602,7 @@ private fun L14Block(vm: LauncherVM) {
         return
     }
     L14Warnings(vm)
+    NrgTasks(vm)
     val hasTermius = remember(vm.resumeTick) { act.isInstalled(TERMIUS) }
     FlowRow {
         val sc = vm.l14Shortcut
@@ -651,6 +652,30 @@ private fun L14Warnings(vm: LauncherVM) {
                 modifier = Modifier.padding(vertical = 1.dp)
             )
         }
+    }
+}
+
+/** Open tasks from NRG's task register, as last checked on the L14. Tap the title line to fold. */
+@Composable
+private fun NrgTasks(vm: LauncherVM) {
+    val t = vm.l14Status?.tasks ?: return
+    val s = vm.store
+    val at = t.checked.substringAfter('T', "").take(5)
+    val head = "NRG tasks: ${t.open} open" + (if (t.broken > 0) ", ${t.broken} broken" else "") +
+        (if (at.isNotEmpty()) "  ·  checked $at" else "") + if (s.l14TasksOpen.value) "  ▾" else "  ▸"
+    Text(
+        head, color = Dim, fontSize = 13.sp,
+        modifier = Modifier.combinedClickable { s.l14TasksOpen.set(!s.l14TasksOpen.value) }.padding(vertical = 4.dp)
+    )
+    if (!s.l14TasksOpen.value) return
+    Column(Modifier.padding(bottom = 8.dp)) {
+        t.rows.forEach { r ->
+            Text(
+                "${r.id}  ${r.title}", color = Fg, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+        if (t.rows.isEmpty()) Text("Nothing open", color = Dim, fontSize = 13.sp)
     }
 }
 

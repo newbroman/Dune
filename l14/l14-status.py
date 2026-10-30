@@ -10,14 +10,15 @@ Checks: backups (USB / Drive / mirror logs, failures, USB drive present), servic
 hydrobot, NRG ship watcher, failed units, Claude Remote Control), machine (disk, power, updates,
 restart needed) and NRG jobs (last ship, report PDF, Water Watch, dashboard publish). It also
 passes on the FAIL/WARN lines of the daily l14-health report for things too slow to check live
-(restore drill, unpushed git, rebuild kit).
+(restore drill, unpushed git, rebuild kit), and the open tasks of NRG's tools/task_register.csv
+(task_lint.py, re-run in the background every 6 hours).
 
 Protocol (deliberately not HTTP, so Android's cleartext rules don't apply; Tailscale encrypts the
 link anyway): the client connects, sends the token and a newline, gets one JSON document, and the
 server closes. Wrong token, or a client outside localhost / LAN / Tailscale ranges, gets nothing.
 
 Read-only: changes nothing on the machine except creating its own token file.
-Stdlib only. Version 1.0.0, 2026-10-30.
+Stdlib only. Version 1.1.0, 2026-10-30 (1.1.0: NRG task list).
 """
 import datetime as dt
 import glob
@@ -312,9 +313,98 @@ def check_health_report(c):
             c.add("Daily check", name.strip(), FAIL if l.startswith("FAIL") else WARN, detail.strip())
 
 
+# ------------------------------------------------------------------------------ NRG task register
+# tools/task_lint.py computes each task's state by running its check (no stored status), which can
+# take a minute or two, so it runs in the background every TASKS_EVERY seconds and Dune gets the
+# last result. Its text format is the one working/dashboard/emit_status.py also parses.
+TASKS_EVERY = 6 * 3600
+TASK_OPEN = re.compile(r"^\s+OPEN\s+(T-\d+)\s+(.*?)\s*(?:\[([^\]]+)\])?\s*$")
+TASK_DETAIL = re.compile(r"^\s+(\S+)\s+\(want\s+([^)]+)\)(?:\s+opened\s+(\d{4}-\d{2}-\d{2}))?")
+TASK_BROKEN = re.compile(r"^\s{6,}(T-\d+)\s+(.*\S)\s*$")
+TASK_TOTAL = re.compile(r"(\d+)\s+task\(s\):\s*(\d+)\s+done,\s*(\d+)\s+open,\s*(\d+)\s+broken")
+_tasks = {"data": None, "t": 0, "running": False}
+
+
+def task_titles():
+    """Full titles from the register (task_lint shortens them to ~60 characters)."""
+    import csv
+    try:
+        with open(os.path.join(NRG, "tools", "task_register.csv"), encoding="utf-8", newline="") as fh:
+            return {r["id"].strip(): (r.get("title") or "").strip() for r in csv.DictReader(fh) if r.get("id")}
+    except (OSError, KeyError):
+        return {}
+
+
+def parse_task_lint(out, titles=None):
+    titles = titles or {}
+    rows, broken, pending, in_fail = [], [], None, False
+    for line in out.splitlines():
+        if "could not answer" in line:
+            in_fail = True
+            continue
+        m = TASK_OPEN.match(line)
+        if m:
+            in_fail = False
+            pending = {"id": m.group(1), "title": titles.get(m.group(1)) or m.group(2),
+                       "gate": m.group(3) or ""}
+            rows.append(pending)
+            continue
+        if pending is not None:
+            d = TASK_DETAIL.match(line)
+            if d:
+                pending.update(value=d.group(1), want=d.group(2).strip(), opened=d.group(3) or "")
+                pending = None
+                continue
+        if in_fail:
+            b = TASK_BROKEN.match(line)
+            if b:
+                broken.append({"id": b.group(1), "title": titles.get(b.group(1)) or b.group(2)})
+    tot = TASK_TOTAL.search(out)
+    if not rows and not tot:
+        return None
+    t = {"total": int(tot.group(1)) if tot else len(rows), "done": int(tot.group(2)) if tot else 0,
+         "open": int(tot.group(3)) if tot else len(rows), "broken": int(tot.group(4)) if tot else len(broken),
+         "rows": sorted(rows, key=lambda r: int(r["id"][2:])), "brokenRows": broken}
+    return t
+
+
+def refresh_tasks():
+    if _tasks["running"] or not os.path.exists(os.path.join(NRG, "tools", "task_lint.py")):
+        return
+    _tasks["running"] = True
+    try:
+        try:
+            p = subprocess.run(["nice", "-n", "15", "python3", "tools/task_lint.py", "--open"], cwd=NRG,
+                               capture_output=True, text=True, timeout=600)
+            data = parse_task_lint(p.stdout, task_titles())
+        except Exception:
+            data = None
+        if data is not None:
+            data["checked"] = dt.datetime.now().astimezone().isoformat(timespec="minutes")
+            _tasks["data"] = data
+            with _lock:
+                _cache["t"] = 0  # next answer carries the new list
+        _tasks["t"] = time.time()
+    finally:
+        _tasks["running"] = False
+
+
+def tasks_loop():
+    while True:
+        refresh_tasks()
+        time.sleep(TASKS_EVERY)
+
+
+def check_tasks(c):
+    t = _tasks["data"]
+    if t and t.get("broken"):
+        ids = " ".join(b["id"] for b in t.get("brokenRows", [])) or f"{t['broken']}"
+        c.add("NRG jobs", "Task register", WARN, f"{t['broken']} check(s) could not answer: {ids}")
+
+
 def run_checks():
     c = Checks()
-    for fn in (check_backups, check_services, check_machine, check_nrg, check_health_report):
+    for fn in (check_backups, check_services, check_machine, check_nrg, check_tasks, check_health_report):
         try:
             fn(c)
         except Exception as e:  # one broken check must not hide the others
@@ -326,6 +416,7 @@ def run_checks():
         "generated": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
         "fail": n_fail, "warn": n_warn,
         "items": c.items,
+        "tasks": _tasks["data"],
     }
 
 
@@ -391,6 +482,7 @@ def serve():
     except OSError:
         srv = Server4(("0.0.0.0", PORT), Handler)  # machine without IPv6
     srv.tok = token()
+    threading.Thread(target=tasks_loop, daemon=True).start()
     print(f"l14-status listening on port {PORT}", flush=True)
     srv.serve_forever()
 
@@ -404,6 +496,11 @@ def as_text(d):
             group = i["group"]
             out.append(f"\n{group}")
         out.append(f"{mark[i['level']]}{i['name']}: {i['detail']}")
+    t = d.get("tasks")
+    if t:
+        out.append(f"\nNRG tasks: {t['open']} open, {t['done']} done, {t['broken']} broken (checked {t.get('checked', '?')})")
+        for r in t["rows"]:
+            out.append(f"  {r['id']:>6}  {r['title'][:70]}  ({r.get('value', '?')}, want {r.get('want', '?')})")
     return "\n".join(out)
 
 
@@ -414,6 +511,10 @@ if __name__ == "__main__":
     elif arg == "token":
         print(token())
     elif arg == "--json":
+        refresh_tasks()
         print(json.dumps(run_checks(), indent=1))
     else:
+        if "--no-tasks" not in sys.argv:
+            print("Running the NRG task checks (a minute or two; --no-tasks skips them)…", flush=True)
+            refresh_tasks()
         print(as_text(run_checks()))

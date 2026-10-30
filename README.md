@@ -65,7 +65,8 @@ The L14 panel lists what needs attention on the L14: backups (nightly USB, weekl
 USB drive plugged in), services (Drive mount, hydrobot, NRG ship watcher, failed units, Claude Remote
 Control), the machine (disk space, on battery, updates, restart needed) and NRG jobs (last ship, report
 PDF older than its sources, Water Watch overdue, dashboard publish), plus the slow findings of the
-daily `l14-health` check. It comes from `l14/l14-status.py`, a small read-only service on the L14:
+daily `l14-health` check, and the open tasks of NRG's task register (`task_lint.py`, re-run on the
+L14 every 6 hours; tap the *NRG tasks* line to fold the list). It comes from `l14/l14-status.py`, a small read-only service on the L14:
 ```
 curl -fsSL https://raw.githubusercontent.com/newbroman/Dune/main/l14/install.sh | bash
 ```

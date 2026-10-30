@@ -198,6 +198,8 @@ class Store private constructor(ctx: Context) {
     /** l14-status.py on the L14: its port and token (`l14-status.py token`). Blank token = no warnings. */
     val l14StatusPort = Str("l14StatusPort", "8714")
     val l14StatusToken = Str("l14StatusToken", "")
+    /** NRG task list on the home screen: expanded or folded to one line. */
+    val l14TasksOpen = Flag("l14TasksOpen", true)
     val l14Lines = Str(
         "l14Lines",
         """

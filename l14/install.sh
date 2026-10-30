@@ -17,7 +17,7 @@ systemctl --user is-active --quiet l14-status.service \
   || { echo "l14-status did not start:"; journalctl --user -u l14-status.service -n 20 --no-pager; exit 1; }
 
 echo
-python3 "$HOME/bin/l14-status.py"
+python3 "$HOME/bin/l14-status.py" --no-tasks
 echo
 echo "== For Dune (Settings > L14) =="
 TS=$(tailscale ip -4 2>/dev/null | head -1 || true)

@@ -44,4 +44,19 @@ class L14StatusTest {
         val clean = L14Status("", 0, 0, emptyList())
         assertTrue(l14Summary(true, clean).endsWith("all OK"))
     }
+
+    @Test fun parsesTaskList() {
+        val j = """{"items":[],"tasks":{"total":120,"done":103,"open":2,"broken":0,"checked":"2026-10-30T06:30+00:00",
+            "rows":[{"id":"T-16","title":"Move report_edits/ under docs/","gate":"T-02","value":"1","want":"0","opened":"2026-08-27"},
+                    {"id":"T-111","title":"Republish the chatbot","gate":"","value":"0","want":"1","opened":""}]}}"""
+        val t = L14Status.parse(j).tasks!!
+        assertEquals(2, t.open)
+        assertEquals(103, t.done)
+        assertEquals(listOf("T-16", "T-111"), t.rows.map { it.id })
+        assertEquals("0", t.rows[0].want)
+    }
+
+    @Test fun noTasksYetIsNull() {
+        assertEquals(null, L14Status.parse("""{"items":[],"tasks":null}""").tasks)
+    }
 }
