@@ -64,6 +64,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.runtime.mutableFloatStateOf
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.time.LocalDateTime
@@ -346,7 +348,7 @@ private fun SpeakButton(act: MainActivity, modifier: Modifier) {
             act.listen("Say a command") { it?.let { t -> act.handleAsk(t, speak = true) } }
         }) {
         Box(contentAlignment = Alignment.Center) {
-            Text("🎤  Speak", color = Bg, fontSize = 26.sp, fontWeight = FontWeight.Medium)
+            FitText("🎤  Speak", Bg, 26.sp, FontWeight.Medium)
         }
     }
 }
@@ -365,6 +367,21 @@ private fun TileGrid(tiles: List<TileSpec>, columns: Int, fill: Boolean) {
     }
 }
 
+/** One line of text that shrinks until it fits, rather than wrapping (e.g. "Message" / "s"). */
+@Composable
+private fun FitText(text: String, color: Color, size: androidx.compose.ui.unit.TextUnit, weight: FontWeight? = null,
+                    modifier: Modifier = Modifier) {
+    var scale by remember(text, size) { mutableFloatStateOf(1f) }
+    var ready by remember(text, size) { mutableStateOf(false) }
+    Text(
+        text, color = color, fontSize = size * scale, fontWeight = weight, maxLines = 1, softWrap = false,
+        modifier = modifier.drawWithContent { if (ready) drawContent() },
+        onTextLayout = { r ->
+            if (r.didOverflowWidth && scale > 0.45f) scale *= 0.9f else ready = true
+        },
+    )
+}
+
 @Composable
 private fun BigIcon(label: String, onClick: () -> Unit) {
     Box(Modifier.size(72.dp).background(Color(0xFF221F1A), RoundedCornerShape(36.dp))
@@ -379,9 +396,9 @@ private fun RowScope.Tile(title: String, sub: String?, highlight: Boolean = fals
         border = BorderStroke(1.dp, if (highlight) Sand else Faint),
         modifier = Modifier.weight(1f).then(if (fill) Modifier.fillMaxHeight() else Modifier.height(104.dp))
             .padding(5.dp).combinedClickableCompat(onClick)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.Center) {
-            Text(title, color = Fg, fontSize = 22.sp)
-            if (sub != null) Text(sub, color = if (highlight) Sand else Dim, fontSize = 14.sp)
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 14.dp), verticalArrangement = Arrangement.Center) {
+            FitText(title, Fg, 22.sp)
+            if (sub != null) FitText(sub, if (highlight) Sand else Dim, 14.sp)
         }
     }
 }
@@ -421,7 +438,7 @@ private fun MessagesPanel(vm: LauncherVM, messages: List<NotifItem>, close: () -
 private fun Pill(label: String, onClick: () -> Unit) {
     Surface(shape = RoundedCornerShape(24.dp), color = Color(0xFF221F1A), modifier = Modifier.padding(end = 10.dp)
         .combinedClickableCompat(onClick)) {
-        Text(label, color = Fg, fontSize = 18.sp, modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp))
+        FitText(label, Fg, 18.sp, modifier = Modifier.padding(horizontal = 18.dp, vertical = 12.dp))
     }
 }
 
