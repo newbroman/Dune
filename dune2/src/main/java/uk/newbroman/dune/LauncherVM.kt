@@ -168,6 +168,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var jumpHub by mutableStateOf<String?>(null)
     /** Dune 2: the hub on screen. */
     var currentHub by mutableStateOf("home")
+    /** Tasks hub: which tab to show (a notes search result asks for "notes"). */
+    var tasksTab by mutableStateOf("tasks")
     /** Ask the map page to switch to a map (by id), e.g. the rain radar from the weather page. */
     var mapRequest by mutableStateOf<String?>(null)
     /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */

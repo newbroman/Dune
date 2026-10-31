@@ -51,20 +51,21 @@ object TasksHub : Hub {
 
     override fun search(ctx: android.content.Context, vm: LauncherVM, q: String) =
         vm.store.notes.filter { Find.matches(it.text, q) }.take(4).map { n ->
-            ("✎ " + n.text.lineSequence().first().take(60)) to { vm.jumpHub = id; vm.screen = Screen.HOME }
+            ("✎ " + n.text.lineSequence().first().take(60)) to { vm.tasksTab = "notes"; vm.jumpHub = id; vm.screen = Screen.HOME }
         }
 
     @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) {
         val act = LocalContext.current as MainActivity
         val s = vm.store
-        var tab by rememberSaveable { mutableStateOf("tasks") }
+        var tab by remember { mutableStateOf(vm.tasksTab) }
+        androidx.compose.runtime.LaunchedEffect(vm.tasksTab) { tab = vm.tasksTab }
         HubPage("Tasks", gestures) {
             item {
                 AppsRow(vm, id, APPS, WORDS)
                 Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     listOf("tasks" to "Tasks · ${s.tasks.count { !it.done }}", "notes" to "Notes · ${s.notes.size}").forEach { (k, l) ->
                         Text(l, color = if (tab == k) Sand else Dim, fontSize = 15.sp,
-                            modifier = Modifier.combinedClickable { tab = k }.padding(end = 18.dp, top = 4.dp, bottom = 4.dp))
+                            modifier = Modifier.combinedClickable { tab = k; vm.tasksTab = k }.padding(end = 18.dp, top = 4.dp, bottom = 4.dp))
                     }
                     androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                     Text("🎤", fontSize = 20.sp, modifier = Modifier.combinedClickable {

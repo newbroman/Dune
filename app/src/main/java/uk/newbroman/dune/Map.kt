@@ -267,6 +267,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
             // A strip down the left edge still swipes back to the inbox.
             Box(Modifier.width(26.dp).fillMaxHeight().pointerInput(Unit) { })
+            // …and one down the right edge, to swipe on to the weather page.
+            Box(Modifier.align(Alignment.CenterEnd).width(26.dp).fillMaxHeight().pointerInput(Unit) { })
             if (!fine) Column(Modifier.align(Alignment.Center).background(Color(0xE6000000)).padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(if (any) "Only your rough area is allowed" else "Dune needs your location for the map", color = Fg, fontSize = 16.sp)

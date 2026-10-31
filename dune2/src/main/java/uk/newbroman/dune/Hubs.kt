@@ -99,8 +99,10 @@ fun HubScreen(vm: LauncherVM) {
     LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != 0) pager.animateScrollToPage(0) }
     LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == 0) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
-        vm.jumpHub?.let { id -> hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) } ?: ctx.toast("Add the ${Hubs.byId(id)?.title ?: id} hub in Settings › Hubs") }
-        vm.jumpHub = null
+        val id = vm.jumpHub ?: return@LaunchedEffect
+        vm.jumpHub = null   // clear first, so a cut-short jump can't leave the next tap ignored
+        hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
+            ?: ctx.toast("Add the ${Hubs.byId(id)?.title ?: id} hub in Settings › Hubs")
     }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
@@ -171,13 +173,15 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
     val lastMap = vm.store.hubLastApp.value.lines().mapNotNull { l -> l.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
     val lastPkg = lastMap[hub]
     var list by remember { mutableStateOf<List<HubApp>?>(null) }
+    val scope = rememberCoroutineScope()
     fun remember(p: String) = vm.store.hubLastApp.set((lastMap + (hub to p)).entries.joinToString("\n") { "${it.key}=${it.value}" })
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (lastPkg != null && vm.apps.any { it.pkg == lastPkg }) Chip("↗ " + vm.labelFor(lastPkg).take(14)) {
             open(HubApp(lastPkg, vm.labelFor(lastPkg), null))
         }
         Box {
-            Chip("apps ▾") { list = hubApps(ctx, vm, packages, words) }
+            // icons are drawn off the main thread; the menu opens when they're ready
+            Chip("apps ▾") { scope.launch { list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hubApps(ctx, vm, packages, words) } } }
             DropdownMenu(list != null, onDismissRequest = { list = null }) {
                 if (list?.isEmpty() == true) DropdownMenuItem(text = { Text("No apps found for this hub") }, onClick = { list = null })
                 list?.forEach { a ->
@@ -214,14 +218,14 @@ object HomeHub : Hub {
             // One line from each hub; tap to go there.
             item {
                 Column(Modifier.padding(top = 18.dp)) {
-                    Hubs.enabled(s).filter { it.id != "home" }.forEach { h ->
+                    Hubs.enabled(s).filter { it.id != "home" }.forEach { h -> androidx.compose.runtime.key(h.id) {
                         val line = h.summary(vm)
                         if (line != null) Row(Modifier.fillMaxWidth().combinedClickable { vm.jumpHub = h.id }.padding(vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(h.glyph, color = Sand, fontSize = 16.sp, modifier = Modifier.padding(end = 12.dp))
                             Text(line, color = Fg, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                    }
+                    } }
                 }
             }
             if (s.showPhrase.value) item { PhraseBlock(vm) }

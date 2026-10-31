@@ -91,14 +91,14 @@ object CommsHub : Hub {
         val act = LocalContext.current as MainActivity
         val items by NotifService.items.collectAsState()
         // The week's log is read off the main thread, and again whenever new notifications arrive.
-        val convos by produceState(emptyList<Convo>(), items) {
+        val convos by produceState<List<Convo>?>(null, items) {
             value = withContext(Dispatchers.IO) { Convos.build(InboxLog.all(act), items) }
         }
         var filter by rememberSaveable { mutableStateOf("all") }
         var open by remember { mutableStateOf<String?>(null) }
         var showOther by remember { mutableStateOf(false) }
         val other = items.filter { it.kind == "other" }
-        val shown = convos.filter { filter == "all" || it.kind == filter }
+        val shown = convos.orEmpty().filter { filter == "all" || it.kind == filter }
 
         HubPage("Comms", gestures) {
             item {
@@ -118,7 +118,7 @@ object CommsHub : Hub {
                         .combinedClickable { vm.inboxAnswer = null }.padding(vertical = 8.dp))
                 }
                 if (NotifService.instance == null) LinkRow("Allow notification access so messages appear here") { Actions.notificationAccess(act) }
-                else if (shown.isEmpty()) Note("No messages in the last week yet. They'll gather here as they arrive.")
+                else if (convos != null && shown.isEmpty()) Note("No messages in the last week yet. They'll gather here as they arrive.")
             }
             shown.forEach { c ->
                 item(key = "c:" + c.who.lowercase()) {
@@ -165,7 +165,7 @@ private fun ConvoRow(vm: LauncherVM, c: Convo, open: Boolean, toggle: () -> Unit
                     Chip("text") { Find.text(act, p) }
                     Chip("WhatsApp") { Find.whatsapp(act, p) }
                 }
-                c.live.forEach { n -> Chip("✕ clear") { NotifService.instance?.cancelNotification(n.key) } }
+                if (c.live.isNotEmpty()) Chip("✕ clear") { c.live.forEach { n -> NotifService.instance?.cancelNotification(n.key) } }
             }
             c.replyable?.let { n -> ReplyBox(n) }
         }
