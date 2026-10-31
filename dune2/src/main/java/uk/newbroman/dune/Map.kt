@@ -25,6 +25,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -125,8 +128,11 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
 
     var showing by remember { mutableStateOf<SavedTrack?>(null) }
     var showingPts by remember { mutableStateOf<List<TrackPoint>?>(null) }
-    // Things to draw once Dune's own map has loaded (e.g. after switching away from Mapy.com).
-    val pendingJs = remember { mutableListOf<String>() }
+    // What's drawn on Dune's own map is kept here as state, and redrawn whenever that map (re)loads –
+    // so nothing is lost while it's loading, or when you switch to Mapy.com and back.
+    var placeShown by remember { mutableStateOf<Found?>(null) }
+    var routeShown by remember { mutableStateOf<List<Pair<Double, Double>>?>(null) }
+    val ready = remember { booleanArrayOf(false) }   // Dune's own map loaded and ready for drawing
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
         WebView(act).apply {
@@ -140,12 +146,15 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             setBackgroundColor(android.graphics.Color.BLACK)
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? = loader.shouldInterceptRequest(r.url)
+                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) { ready[0] = false }
                 override fun onPageFinished(v: WebView, url: String?) {
+                    ready[0] = url?.startsWith(LEAFLET) == true
                     if (url?.startsWith(LEAFLET) == true) {
                         here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null)
                         v.evaluateJavascript("setTrack(${trackJs(Tracks.points.value)})", null)
                         showingPts?.let { v.evaluateJavascript("showTrack(${trackJs(it)})", null) }   // a saved track asked for before the map loaded
-                        pendingJs.forEach { v.evaluateJavascript(it, null) }; pendingJs.clear()
+                        placeShown?.let { f -> v.evaluateJavascript("showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})", null) }
+                        routeShown?.let { r -> v.evaluateJavascript("showRoute(${routeJs(r)})", null) }
                     }
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
@@ -195,7 +204,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         val (pts, info) = withContext(Dispatchers.IO) { runCatching { TrackMath.parseGpx(f.readText()) }.getOrDefault(emptyList()) to Tracks.list(act).firstOrNull { it.file == f } }
         showing = info; showingPts = pts
         if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn when the map finishes loading
-        else web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
+        else if (ready[0]) web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
     }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
@@ -284,7 +293,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                                     val pts = withContext(Dispatchers.IO) { runCatching { TrackMath.parseGpx(tr.file.readText()) }.getOrDefault(emptyList()) }
                                     showingPts = pts
                                     if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn on load
-                                    else web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
+                                    else if (ready[0]) web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
                                 }
                             })
                     }
@@ -297,9 +306,14 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 else web.evaluateJavascript("setAlign($align)", null)
             }
         }
-        PlaceSearch(vm, here, onDraw = { js ->
-            if (source.site != null) { pendingJs += js; show(MAP_SOURCES.first { it.id == "dark" }) } else web.evaluateJavascript(js, null)
-        })
+        PlaceSearch(vm, here, active,
+            onPlace = { f ->
+                placeShown = f; routeShown = null
+                if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // Mapy.com's site can't show Dune's marker
+                else if (ready[0]) web.evaluateJavascript("clearPlace();showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})", null)
+            },
+            onRoute = { r -> routeShown = r; if (ready[0]) web.evaluateJavascript("showRoute(${routeJs(r)})", null) },
+            onClear = { placeShown = null; routeShown = null; if (ready[0]) web.evaluateJavascript("clearPlace()", null) })
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             when {
@@ -421,18 +435,28 @@ fun openIn(ctx: Context, m: MapApp, l: Location?, place: String?) {
 
 private fun trackJs(p: List<TrackPoint>) = p.joinToString(",", "[", "]") { "[${it.lat},${it.lon}]" }
 
+private fun routeJs(r: List<Pair<Double, Double>>) = r.joinToString(",", "[", "]") { "[${it.first},${it.second}]" }
+
 /** Find a place, show it, get walking / cycling / driving directions – Dune's own, no app needed. */
 @Composable
-private fun PlaceSearch(vm: LauncherVM, here: Location?, onDraw: (String) -> Unit) {
+private fun PlaceSearch(vm: LauncherVM, here: Location?, active: Boolean, onPlace: (Found) -> Unit, onRoute: (List<Pair<Double, Double>>) -> Unit, onClear: () -> Unit) {
     val act = LocalContext.current as MainActivity
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
     var q by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Found>?>(null) }
     var picked by remember { mutableStateOf<Found?>(null) }
     var routeInfo by remember { mutableStateOf<String?>(null) }
     var mode by remember { mutableStateOf("foot") }
+    var job by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    LaunchedEffect(active) { if (!active) focus.clearFocus() }
     val search = {
-        if (q.isNotBlank()) scope.launch { results = Routes.search(q.trim(), here?.latitude, here?.longitude); if (results?.isEmpty() == true) act.toast("Nothing found") }
+        focus.clearFocus()
+        if (q.isNotBlank()) scope.launch {
+            val r = Routes.search(q.trim(), here?.latitude, here?.longitude)
+            results = r ?: emptyList()
+            if (r == null) act.toast("Search failed – check the connection") else if (r.isEmpty()) act.toast("Nothing found")
+        }
     }
     Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 2.dp).border(1.dp, Faint, androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
         .padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -443,16 +467,16 @@ private fun PlaceSearch(vm: LauncherVM, here: Location?, onDraw: (String) -> Uni
             modifier = Modifier.weight(1f).padding(vertical = 9.dp),
             decorationBox = { inner -> Box { if (q.isEmpty()) Text("Find a place", color = Faint, fontSize = 15.sp); inner() } })
         if (q.isNotEmpty() || picked != null) Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
-            q = ""; results = null; picked = null; routeInfo = null; onDraw("clearPlace()")
+            job?.cancel(); q = ""; results = null; picked = null; routeInfo = null; focus.clearFocus(); onClear()
         }.padding(10.dp))
         else Text("🎤", fontSize = 15.sp, modifier = Modifier.combinedClickable { act.listen("Where?") { it?.let { t -> q = t; search() } } }.padding(10.dp))
     }
     results?.let { list ->
-        Column(Modifier.padding(start = 24.dp, end = 12.dp)) {
+        // A short scrolling list, so the map keeps its room even with the keyboard up.
+        Column(Modifier.padding(start = 24.dp, end = 12.dp).heightIn(max = 200.dp).verticalScroll(rememberScrollState())) {
             list.forEach { f ->
                 Column(Modifier.fillMaxWidth().combinedClickable {
-                    picked = f; results = null; routeInfo = null
-                    onDraw("showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})")
+                    job?.cancel(); picked = f; results = null; routeInfo = null; focus.clearFocus(); onPlace(f)
                 }.padding(vertical = 6.dp)) {
                     Text(f.name, color = Fg, fontSize = 15.sp, maxLines = 1)
                     if (f.detail.isNotBlank()) Text(f.detail, color = Dim, fontSize = 12.sp, maxLines = 1)
@@ -466,11 +490,13 @@ private fun PlaceSearch(vm: LauncherVM, here: Location?, onDraw: (String) -> Uni
                 MapAction((if (mode == m && routeInfo != null) "● " else "") + icon) {
                     val from = here ?: run { act.toast("Waiting for your location…"); return@MapAction }
                     mode = m; routeInfo = "routing…"
-                    scope.launch {
+                    job?.cancel()
+                    job = scope.launch {
                         val r = Routes.route(from.latitude, from.longitude, f.lat, f.lon, m)
+                        if (picked != f) return@launch   // you've moved on to somewhere else
                         if (r == null) { routeInfo = "no route found"; return@launch }
                         routeInfo = String.format(Locale.UK, "%.1f km · %s", r.km, if (r.minutes >= 60) "${r.minutes / 60} h ${r.minutes % 60} min" else "${r.minutes} min")
-                        onDraw("showRoute(" + r.points.joinToString(",", "[", "]") { "[${it.first},${it.second}]" } + ")")
+                        onRoute(r.points)
                     }
                 }
             }

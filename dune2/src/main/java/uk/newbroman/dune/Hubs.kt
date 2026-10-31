@@ -221,7 +221,7 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
     var list by remember { mutableStateOf<List<HubApp>?>(null) }
     var picking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    fun remember(p: String) = vm.store.hubLastApp.set((lastMap + (hub to p)).entries.joinToString("\n") { "${it.key}=${it.value}" })
+    fun rememberLast(p: String) = vm.store.hubLastApp.set((lastMap + (hub to p)).entries.joinToString("\n") { "${it.key}=${it.value}" })
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (lastPkg != null && vm.apps.any { it.pkg == lastPkg }) Chip("↗ " + vm.labelFor(lastPkg).take(14)) {
             open(HubApp(lastPkg, vm.labelFor(lastPkg), null))
@@ -239,7 +239,7 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
                         trailingIcon = { Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
                             HubAppEdits.remove(vm.store, hub, a.pkg); if (lastPkg == a.pkg) vm.store.hubLastApp.set((lastMap - hub).entries.joinToString("\n") { "${it.key}=${it.value}" }); load()
                         }.padding(8.dp)) },
-                        onClick = { list = null; remember(a.pkg); open(a) })
+                        onClick = { list = null; rememberLast(a.pkg); open(a) })
                 }
                 DropdownMenuItem(text = { Text("+ add an app…", color = Sand) }, onClick = { list = null; picking = true })
             }

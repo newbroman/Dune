@@ -162,6 +162,7 @@
   let placeM = null, route = null;
   window.showPlace = (lat, lon, name) => {
     if (placeM) map.removeLayer(placeM);
+    if (route) { map.removeLayer(route); route = null; }   // a new place: the old route no longer applies
     placeM = L.marker([lat, lon], { title: name }).addTo(map).bindTooltip(name, { permanent: true, direction: 'top', offset: [0, -8] });
     follow = false; if (window.Dune) Dune.following(false);
     map.flyTo([lat, lon], Math.max(map.getZoom(), 14), { duration: .6 });

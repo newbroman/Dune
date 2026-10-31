@@ -14,9 +14,10 @@ data class Route(val points: List<Pair<Double, Double>>, val km: Double, val min
 
 /** Dune's own place search (Photon, from OpenStreetMap) and directions (FOSSGIS routing). Free, no keys. */
 object Routes {
-    suspend fun search(q: String, nearLat: Double?, nearLon: Double?): List<Found> = withContext(Dispatchers.IO) {
+    /** Places matching [q], nearest first; null if the search couldn't be done (offline). */
+    suspend fun search(q: String, nearLat: Double?, nearLon: Double?): List<Found>? = withContext(Dispatchers.IO) {
         val near = if (nearLat != null && nearLon != null) String.format(Locale.US, "&lat=%.4f&lon=%.4f", nearLat, nearLon) else ""
-        runCatching { parseSearch(get("https://photon.komoot.io/api/?limit=8&lang=en$near&q=" + URLEncoder.encode(q, "UTF-8"))) }.getOrDefault(emptyList())
+        runCatching { parseSearch(get("https://photon.komoot.io/api/?limit=8&lang=en$near&q=" + URLEncoder.encode(q, "UTF-8"))) }.getOrNull()
     }
 
     fun parseSearch(json: String): List<Found> {
