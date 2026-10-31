@@ -270,7 +270,9 @@ class Store private constructor(ctx: Context) {
     fun deleteNote(id: Long) = saveNotes(notes.filterNot { it.id == id })
 
     // Hubs: which are switched on, in order ("home" is always first)
-    val hubs = Str("hubs", "home,comms,tasks,map,weather")
+    val hubs = Str("hubs", "home,comms,tasks,record,map,weather")
+    /** Hubs this phone has already been offered (so a new one can be switched on once). */
+    val hubsKnown = Str("hubsKnown", "")
     /** Last app used from each hub's "apps ▾" list, "hub=package" per line. */
     val hubLastApp = Str("hubLastApp", "")
 

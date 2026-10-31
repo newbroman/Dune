@@ -35,7 +35,7 @@ data class AppEntry(
 const val PORTFOLIO = "https://newbroman.github.io/"
 val PORTFOLIO_APP = WebApp("My GitHub apps", PORTFOLIO, "")
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
@@ -170,6 +170,10 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var currentHub by mutableStateOf("home")
     /** Tasks hub: which tab to show (a notes search result asks for "notes"). */
     var tasksTab by mutableStateOf("tasks")
+    /** Record hub: open the camera in video mode. */
+    var cameraVideo by mutableStateOf(false)
+    /** Show a saved track (GPX path) on the map hub. */
+    var mapTrackRequest by mutableStateOf<String?>(null)
     /** Ask the map page to switch to a map (by id), e.g. the rain radar from the weather page. */
     var mapRequest by mutableStateOf<String?>(null)
     /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */

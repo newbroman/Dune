@@ -180,6 +180,15 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     val savedTick by Tracks.saved.collectAsState()
     var trackMenu by remember { mutableStateOf<List<SavedTrack>?>(null) }
     var showing by remember { mutableStateOf<SavedTrack?>(null) }
+    LaunchedEffect(vm.mapTrackRequest) {
+        val path = vm.mapTrackRequest ?: return@LaunchedEffect
+        vm.mapTrackRequest = null
+        val f = java.io.File(path)
+        val pts = runCatching { TrackMath.parseGpx(f.readText()) }.getOrDefault(emptyList())
+        showing = Tracks.list(act).firstOrNull { it.file == f }
+        if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
+        web.postDelayed({ web.evaluateJavascript("showTrack(${trackJs(pts)})", null) }, 900)
+    }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
     }

@@ -72,12 +72,26 @@ interface Hub {
 }
 
 object Hubs {
-    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
+    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, RecordHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
+    /** Hubs switched on by default; a new one in this list is added once, after an update. */
+    private val DEFAULT_ON = listOf("home", "comms", "tasks", "record", "map", "weather")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
-    fun enabled(s: Store): List<Hub> =
-        (listOf("home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" })
+    fun enabled(s: Store): List<Hub> {
+        // Introduce hubs added since this phone last looked (but never re-add one you switched off).
+        val known = s.hubsKnown.value.split(',').filter { it.isNotEmpty() }
+        if (known.isEmpty()) s.hubsKnown.set(ALL.joinToString(",") { it.id }.let { all -> all })
+        else {
+            val fresh = ALL.map { it.id }.filter { it !in known }
+            if (fresh.isNotEmpty()) {
+                val add = fresh.filter { it in DEFAULT_ON }
+                if (add.isNotEmpty()) s.hubs.set((s.hubs.value.split(',').filter { it.isNotEmpty() } + add).joinToString(","))
+                s.hubsKnown.set((known + fresh).joinToString(","))
+            }
+        }
+        return (listOf("home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" })
             .distinct().mapNotNull { byId(it) }
+    }
     fun setEnabled(s: Store, ids: List<String>) = s.hubs.set((listOf("home") + ids.filter { it != "home" }).distinct().joinToString(","))
 }
 
