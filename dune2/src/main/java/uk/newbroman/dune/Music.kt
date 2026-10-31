@@ -84,8 +84,8 @@ object MusicHub : Hub {
 
     /** BBC stations: their Sounds links open straight into the BBC Sounds app when it's installed. */
     val STATIONS = listOf(
-        "Radio 1" to "bbc_radio_one", "Radio 2" to "bbc_radio_two", "Radio 3" to "bbc_radio_three",
-        "Radio 4" to "bbc_radio_fourfm", "4 Extra" to "bbc_radio_four_extra", "5 Live" to "bbc_radio_five_live",
+        "Radio 1" to "bbc_radio_one", "Radio 2" to "bbc_radio_two", "Radio 3" to "bbc_radio_three", "Radio 3 Unwind" to "bbc_radio_three_unwind",
+        "Radio 4" to "bbc_radio_fourfm", "4 Extra" to "bbc_radio_four_extra",
         "6 Music" to "bbc_6music", "Cymru" to "bbc_radio_cymru", "Wales" to "bbc_radio_wales_fm", "World Service" to "bbc_world_service",
     )
 
