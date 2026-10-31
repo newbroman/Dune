@@ -118,6 +118,8 @@ object Kind {
  */
 object Brain {
     data class Provider(val id: String, val name: String, val url: String, val defaultModel: String, val keyHint: String)
+    /** Where to get (or copy) a key for each provider. */
+    fun keyPage(id: String) = if (id == "openrouter") "https://openrouter.ai/settings/keys" else "https://platform.openai.com/api-keys"
     val PROVIDERS = listOf(
         Provider("openai", "OpenAI", "https://api.openai.com/v1/chat/completions", "gpt-5.4-mini", "sk-…  from platform.openai.com/api-keys"),
         Provider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1/chat/completions", "openai/gpt-5.4-mini", "sk-or-…  from openrouter.ai/keys"),

@@ -235,7 +235,20 @@ fun AiSettings(vm: LauncherVM) {
     } else {
         OutlinedTextField(key, { key = it }, label = { Text("${p.name} key  (${p.keyHint})") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
-        LinkRow("Save the key") { if (key.isNotBlank()) { Brain.setKey(act, key); key = ""; tick++; act.toast("Saved") } }
+        Row {
+            Text("Paste", color = Sand, fontSize = 16.sp, modifier = Modifier.combinedClickable {
+                val clip = act.getSystemService(android.content.ClipboardManager::class.java)?.primaryClip
+                val t = clip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(act)?.toString()?.trim()
+                if (t.isNullOrBlank()) act.toast("Nothing copied yet – copy the key first") else key = t
+            }.padding(end = 24.dp, top = 10.dp, bottom = 10.dp))
+            Text("Save the key", color = if (key.isNotBlank()) Fg else Dim, fontSize = 16.sp, modifier = Modifier.combinedClickable {
+                if (key.isNotBlank()) { Brain.setKey(act, key); key = ""; tick++; act.toast("Saved") } else act.toast("Paste or type the key first")
+            }.padding(vertical = 10.dp))
+        }
+        LinkRow("Get or copy a ${p.name} key (opens ${Brain.keyPage(p.id).substringAfter("//").substringBefore('/')})") {
+            act.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(Brain.keyPage(p.id))), "No browser to open it")
+        }
+        Note("Your Rozmowa / Polish app key works here too. A key is only shown in full once when it's made – if you can't copy it, make a new one on that page.")
     }
     OutlinedTextField(model, { model = it; Brain.setModel(act, it) }, label = { Text("Model (blank = ${p.defaultModel})") },
         singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
