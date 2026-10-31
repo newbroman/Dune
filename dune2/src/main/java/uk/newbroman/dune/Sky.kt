@@ -231,8 +231,17 @@ fun SkyBackground(
     val labelStyle = TextStyle(color = Color(0x99D9B26A), fontSize = 10.sp)
 
     Canvas(modifier) {
-      try {
-        val m = model
+      try { drawSky(model, measurer, labelStyle, weather, heading, strength, frame / 1000.0) }
+      catch (e: Exception) { /* A launcher must never crash because of its wallpaper: skip the frame. */ }
+    }
+}
+
+/** Lat/lon → what's in the sky at [ms] (stars, planets, Sun, Moon). Cheap enough to redo each minute. */
+internal fun skyNow(ms: Long, lat: Double, lon: Double): SkyModel = skyModel(julian(ms), lat, lon)
+
+/** Draws the sky (and the weather over it). Shared by Dune's home screen and the Dune Sky wallpaper. */
+internal fun DrawScope.drawSky(m: SkyModel, measurer: androidx.compose.ui.text.TextMeasurer, labelStyle: TextStyle,
+                               weather: Weather?, heading: Float?, strength: Float, t: Double) {
         val cx = size.width / 2f; val cy = size.height * 0.46f
         // Whole sky dome fits the screen width, so every body above the horizon is on screen.
         val r = minOf(size.width, size.height) * 0.47f
@@ -255,7 +264,6 @@ fun SkyBackground(
         val dayDim = when { sunAlt > 0 -> 0.55f; sunAlt > -6 -> 0.75f; else -> 1f }
         val cloudDim = 1f - 0.75f * ((weather?.cloud ?: 0) / 100f) - (if (weather?.foggy == true) 0.2f else 0f)
         val a = strength * dayDim * cloudDim.coerceIn(0.1f, 1f)
-        val t = frame / 1000.0
 
         // Horizon
         drawCircle(Color(0x22D9B26A), r, Offset(cx, cy), style = androidx.compose.ui.graphics.drawscope.Stroke(1.5f))
@@ -314,13 +322,9 @@ fun SkyBackground(
 
         // The weather over the stars, as on the Spheres weather page.
         if (weather != null) drawWeather(weather, h, t, cx, cy, r, sunAlt > -6)
-      } catch (e: Exception) {
-        // A launcher must never crash because of its wallpaper: skip the frame.
-      }
-    }
 }
 
-private class SkyModel(
+internal class SkyModel(
     val stars: List<Triple<Star, Double, Double>>,
     val bodies: List<Triple<Body, Double, Double>>,
     val sunAlt: Double,

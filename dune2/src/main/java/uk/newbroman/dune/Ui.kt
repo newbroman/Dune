@@ -818,8 +818,12 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Weather", s.showWeather) }
         item { Toggle("Inbox summary", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
-        item { Toggle("Phone wallpaper behind the home screen", s.useWallpaper) }
-        item { Toggle("Sky background (when not using the wallpaper)", s.showSky) }
+        item { Toggle("Sky background", s.showSky) }
+        item {
+            LinkRow(if (SkyWallpaper.isActive(act)) "✓ Dune Sky is your wallpaper – change it" else "Use the sky as your wallpaper and lock screen") { SkyWallpaper.choose(act) }
+            Note("Sets “Dune Sky” – the same sky, planets and weather – as Android's wallpaper; choose home and lock screen to see it when you wake the phone.")
+        }
+        item { Toggle("Show the phone's wallpaper behind Dune instead of drawing the sky", s.useWallpaper) }
         item { Toggle("Weather on the sky", s.skyWeather) }
         item { Toggle("Turn the sky with the compass", s.skyCompass) }
         item { Toggle("App groups", s.showGroups) }

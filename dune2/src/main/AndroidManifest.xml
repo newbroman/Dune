@@ -139,6 +139,18 @@
             android:taskAffinity="uk.newbroman.dune.split"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- Dune Sky: the home screen's sky, planets and weather as the phone's wallpaper and lock screen -->
+        <service
+            android:name=".SkyWallpaper"
+            android:exported="true"
+            android:label="Dune Sky"
+            android:permission="android.permission.BIND_WALLPAPER">
+            <intent-filter>
+                <action android:name="android.service.wallpaper.WallpaperService" />
+            </intent-filter>
+            <meta-data android:name="android.service.wallpaper" android:resource="@xml/sky_wallpaper" />
+        </service>
+
         <service
             android:name=".AudioRecService"
             android:exported="false"

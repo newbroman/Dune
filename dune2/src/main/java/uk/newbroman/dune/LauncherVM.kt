@@ -553,6 +553,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
                 }
                 skyLat = p.lat; skyLon = p.lon
                 weather = Weather.fetch(p.lat, p.lon, p.name)
+                SkyWallpaper.remember(ctx, p.lat, p.lon, weather!!)   // the Dune Sky wallpaper uses the same place and weather
                 weatherAt = System.currentTimeMillis(); weatherKey = place; weatherMsg = null
             } catch (e: Exception) {
                 weatherMsg = "Weather unavailable – tap to retry"

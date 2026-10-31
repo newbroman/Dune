@@ -76,7 +76,7 @@ class Store private constructor(ctx: Context) {
     val showGroups = Flag("showGroups", true)
     val showSky = Flag("showSky", true)
     /** Behind the home hubs: your phone's wallpaper (darkened a little so text stays readable), or Dune's sky. */
-    val useWallpaper = Flag("useWallpaper", true)
+    val useWallpaper = Flag("useWallpaper", false)
     val skyCompass = Flag("skyCompass", true)
     val skyWeather = Flag("skyWeather", true)
     val groupRules = Str("groupRules", DEFAULT_GROUP_RULES)
