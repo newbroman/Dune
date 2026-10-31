@@ -139,6 +139,12 @@ object Net {
         return ad.isEnabled to devs
     }
 
+    /** Just the public address (for the outside scan). */
+    suspend fun publicIpOnly(): String? = withContext(Dispatchers.IO) {
+        runCatching { (URL("https://api.ipify.org").openConnection() as HttpURLConnection).run { connectTimeout = 6000; readTimeout = 6000; inputStream.bufferedReader().readText().trim() } }
+            .getOrNull()?.takeIf { Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$").matches(it) }
+    }
+
     /** The internet as seen from outside: public IP and provider. */
     suspend fun publicIp(): String? = withContext(Dispatchers.IO) {
         runCatching {

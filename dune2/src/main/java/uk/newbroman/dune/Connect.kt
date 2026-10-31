@@ -79,6 +79,18 @@ object ConnectHub : Hub {
         var scanState by remember { mutableStateOf<String?>(null) }
         var hosts by remember { mutableStateOf<List<LanHost>>(emptyList()) }
         var openHost by remember { mutableStateOf<String?>(null) }
+        // RoboShadow-style tools: full port scans per device, the outside view, history and reports.
+        val portScans = remember { androidx.compose.runtime.mutableStateMapOf<String, List<OpenPort>>() }
+        val portProgress = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
+        var fresh by remember { mutableStateOf<Set<String>>(emptySet()) }
+        var outsideState by remember { mutableStateOf<String?>(null) }
+        var outsideResult by remember { mutableStateOf<List<OpenPort>?>(null) }
+        var showHistory by remember { mutableStateOf(false) }
+        val prefs = remember { act.getSharedPreferences("dune", 0) }
+        // Remember the home network's public address while on Wi-Fi, so it can be checked from outside later.
+        LaunchedEffect(active, wifi?.ssid) {
+            if (active && wifi?.connected == true) Net.publicIpOnly()?.let { prefs.edit().putString("homePublicIp", it).putString("homePublicIpNet", wifi?.ssid ?: "home").apply() }
+        }
         LaunchedEffect(active) { if (active && publicIp == null) publicIp = Net.publicIp() ?: "offline?" }
 
         HubPage("Connect", gestures) {
@@ -173,15 +185,66 @@ object ConnectHub : Hub {
                                 h.copy(name = nm, services = svc)
                             }
                             hosts = all.sortedBy { it.ip.split('.').last().toIntOrNull() ?: 0 }
+                            val net = w.ssid ?: (w.gateway ?: "this network")
+                            withContext(Dispatchers.IO) {
+                                fresh = Scanner.newSince(Scanner.history(act).firstOrNull { it.network == net }, hosts)
+                                Scanner.save(act, net, hosts)
+                            }
                             scanState = null
                         }
                     }
                 }
-                if (hosts.isNotEmpty()) Text("${hosts.size} found · " + hosts.groupBy { it.kind }.entries.joinToString(" · ") { "${it.value.size} ${it.key}" + if (it.value.size > 1) "s" else "" },
-                    color = Dim, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                if (hosts.isNotEmpty()) Text("${hosts.size} found · " + hosts.groupBy { it.kind }.entries.joinToString(" · ") { "${it.value.size} ${it.key}" + if (it.value.size > 1) "s" else "" } +
+                    (if (fresh.isNotEmpty()) " · ${fresh.size} new since last scan" else ""),
+                    color = if (fresh.isNotEmpty()) Sand else Dim, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp))
+                FlowRow {
+                    Chip(outsideState ?: "outside view") {
+                        if (outsideState != null) return@Chip
+                        val home = prefs.getString("homePublicIp", null)
+                        if (home == null) { act.toast("Open this hub once on your home Wi-Fi first, so Dune knows its public address"); return@Chip }
+                        if (wifi?.connected == true) { act.toast("Turn Wi-Fi off and use mobile data: Dune then checks $home from outside, as an attacker would"); return@Chip }
+                        scope.launch {
+                            outsideState = "checking $home…"
+                            outsideResult = Scanner.outside(home) { p -> outsideState = "checking… $p%" }
+                            outsideState = null
+                        }
+                    }
+                    if (hosts.isNotEmpty()) Chip("report") { Scanner.shareReport(act, Ports.report(wifi?.ssid ?: "network", hosts, portScans)) }
+                    Chip(if (showHistory) "hide history" else "history") { showHistory = !showHistory }
+                }
+                outsideResult?.let { r ->
+                    val home = prefs.getString("homePublicIp", "") ?: ""
+                    Column(Modifier.fillMaxWidth().padding(vertical = 6.dp).border(1.dp, if (r.any { it.risk != null }) Sand else Faint, RoundedCornerShape(12.dp)).padding(10.dp)) {
+                        Text("From the internet, ${prefs.getString("homePublicIpNet", "home")} ($home):", color = Fg, fontSize = 14.sp)
+                        if (r.isEmpty()) Text("✓ Nothing answered on the ${Ports.COMMON.size} common ports – the router is hiding everything.", color = Dim, fontSize = 13.sp)
+                        r.forEach { p -> PortLine(p) }
+                        Note("If your provider shares one address between customers (CGNAT), this checks theirs, not yours.")
+                    }
+                }
+                if (showHistory) {
+                    val hist by produceState(emptyList<ScanRecord>(), showHistory) { value = withContext(Dispatchers.IO) { Scanner.history(act) } }
+                    if (hist.isEmpty()) Note("No scans yet.")
+                    hist.forEachIndexed { i, r ->
+                        val prev = hist.drop(i + 1).firstOrNull { it.network == r.network }
+                        val added = Scanner.newSince(prev, r.hosts); val gone = prev?.let { Scanner.newSince(r, it.hosts) }.orEmpty()
+                        Text(java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.UK).format(java.util.Date(r.time)) + " · ${r.network} · ${r.hosts.size} devices" +
+                            (if (added.isNotEmpty()) " · +${added.size} " + added.joinToString(", ") else "") + (if (gone.isNotEmpty()) " · −${gone.size}" else ""),
+                            color = if (added.isNotEmpty()) Sand else Dim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 2.dp))
+                    }
+                }
             }
             hosts.forEach { h ->
-                item(key = "h" + h.ip) { HostRow(vm, h, h.ip == wifi?.gateway, openHost == h.ip) { openHost = if (openHost == h.ip) null else h.ip } }
+                item(key = "h" + h.ip) {
+                    HostRow(vm, h, h.ip == wifi?.gateway, openHost == h.ip, h.ip in fresh, portScans[h.ip], portProgress[h.ip],
+                        onFullScan = {
+                            if (portProgress[h.ip] == null) scope.launch {
+                                portProgress[h.ip] = 0; portScans[h.ip] = emptyList()
+                                portScans[h.ip] = Scanner.allPorts(h.ip, onOpen = { p -> portScans[h.ip] = (portScans[h.ip].orEmpty() + OpenPort(p, Ports.SERVICES[p] ?: "…", null, null)).sortedBy { it.port } },
+                                    progress = { portProgress[h.ip] = it })
+                                portProgress.remove(h.ip)
+                            }
+                        }) { openHost = if (openHost == h.ip) null else h.ip }
+                }
             }
 
             // ---- Printers and speakers
@@ -231,7 +294,16 @@ private fun Section(t: String, onSettings: () -> Unit) {
 }
 
 @Composable
-private fun HostRow(vm: LauncherVM, h: LanHost, isRouter: Boolean, open: Boolean, toggle: () -> Unit) {
+private fun PortLine(p: OpenPort) {
+    Column(Modifier.padding(vertical = 2.dp)) {
+        Text("${p.port}  ${p.service}" + (p.banner?.let { "  · $it" } ?: ""), color = Fg, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        p.risk?.let { Text("⚠ $it", color = Sand, fontSize = 12.sp) }
+    }
+}
+
+@Composable
+private fun HostRow(vm: LauncherVM, h: LanHost, isRouter: Boolean, open: Boolean, isNew: Boolean, ports: List<OpenPort>?, progress: Int?,
+                    onFullScan: () -> Unit, toggle: () -> Unit) {
     val act = LocalContext.current as MainActivity
     val kind = if (isRouter) "router" else h.kind
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
@@ -239,17 +311,23 @@ private fun HostRow(vm: LauncherVM, h: LanHost, isRouter: Boolean, open: Boolean
             Text(Lan.icon(kind), fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
             Column(Modifier.weight(1f)) {
                 Text(h.name ?: kind.replaceFirstChar { it.uppercase() }, color = Fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(h.ip + (if (isRouter) " · your router" else ""), color = Dim, fontSize = 12.sp)
+                Text(h.ip + (if (isRouter) " · your router" else "") + (if (isNew) " · new" else "") +
+                    (ports?.count { it.risk != null }?.takeIf { it > 0 }?.let { " · ⚠ $it" } ?: ""), color = if (isNew) Sand else Dim, fontSize = 12.sp)
             }
         }
         if (open) Column(Modifier.padding(start = 30.dp).border(1.dp, Faint, RoundedCornerShape(12.dp)).padding(10.dp)) {
-            if (h.ports.isNotEmpty()) Text("Open: " + h.ports.sorted().joinToString(", ") { Lan.PORT_NAMES[it] ?: "$it" }, color = Dim, fontSize = 12.sp)
+            if (ports == null && h.ports.isNotEmpty()) Text("Open: " + h.ports.sorted().joinToString(", ") { Lan.PORT_NAMES[it] ?: "$it" }, color = Dim, fontSize = 12.sp)
+            if (ports != null) {
+                Text(if (progress != null) "Scanning all 65,535 ports… $progress%" else "All ports: ${ports.size} open", color = Dim, fontSize = 12.sp)
+                ports.forEach { PortLine(it) }
+            }
             if (h.services.isNotEmpty()) Text("Announces: " + h.services.joinToString(", ") { it.substringBefore(':').removePrefix("_") }, color = Dim, fontSize = 12.sp)
             FlowRow(Modifier.padding(top = 4.dp)) {
                 if (80 in h.ports || 8080 in h.ports || 443 in h.ports || 5000 in h.ports || kind == "printer" || isRouter) {
                     val url = when { 443 in h.ports && 80 !in h.ports -> "https://${h.ip}"; 8080 in h.ports && 80 !in h.ports -> "http://${h.ip}:8080"; else -> "http://${h.ip}" }
                     Chip(if (kind == "printer") "printer's setup page" else "open its web page") { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
                 }
+                if (progress == null) Chip(if (ports == null) "scan all ports" else "scan again") { onFullScan() }
                 if (kind == "printer") Chip("add to Android printing") { act.tryStart(Intent(Settings.ACTION_PRINT_SETTINGS)) }
                 if (kind == "speaker") Chip("open Google Home") { launchPkg(vm, "com.google.android.apps.chromecast.app") }
                 if (22 in h.ports) Chip("SSH in Termux") { Actions.termux(act, "ssh ${h.ip}") }
