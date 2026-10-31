@@ -277,6 +277,9 @@ class Store private constructor(ctx: Context) {
     val hubsKnown = Str("hubsKnown", "")
     /** Last app used from each hub's "apps ▾" list, "hub=package" per line. */
     val hubLastApp = Str("hubLastApp", "")
+    /** Apps you've added to / removed from each hub's list. */
+    val hubAppsAdded = Str("hubAppsAdded", "")
+    val hubAppsRemoved = Str("hubAppsRemoved", "")
 
     private fun readTasks(): List<Task> = try {
         val a = JSONArray(p.getString("tasks", "[]"))

@@ -179,12 +179,30 @@ fun HubPage(title: String, gestures: NestedScrollConnection, trailing: @Composab
 data class HubApp(val pkg: String, val label: String, val icon: ImageBitmap?)
 
 /** Installed apps for a hub: known packages first, then any whose name contains one of [words]. */
-fun hubApps(ctx: Context, vm: LauncherVM, packages: List<String>, words: List<String>): List<HubApp> {
+/** Your own changes to a hub's apps list: "hub=pkg,pkg" per line, for added and for removed apps. */
+object HubAppEdits {
+    private fun read(s: String) = s.lines().mapNotNull { l -> l.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1].split(',').filter { p -> p.isNotBlank() }.toSet() } }.toMap()
+    private fun write(m: Map<String, Set<String>>) = m.filterValues { it.isNotEmpty() }.entries.joinToString("\n") { "${it.key}=" + it.value.joinToString(",") }
+    fun added(s: Store, hub: String) = read(s.hubAppsAdded.value)[hub].orEmpty()
+    fun removed(s: Store, hub: String) = read(s.hubAppsRemoved.value)[hub].orEmpty()
+    fun add(s: Store, hub: String, pkg: String) {
+        val a = read(s.hubAppsAdded.value); val r = read(s.hubAppsRemoved.value)
+        s.hubAppsAdded.set(write(a + (hub to (a[hub].orEmpty() + pkg)))); s.hubAppsRemoved.set(write(r + (hub to (r[hub].orEmpty() - pkg))))
+    }
+    fun remove(s: Store, hub: String, pkg: String) {
+        val a = read(s.hubAppsAdded.value); val r = read(s.hubAppsRemoved.value)
+        s.hubAppsAdded.set(write(a + (hub to (a[hub].orEmpty() - pkg)))); s.hubAppsRemoved.set(write(r + (hub to (r[hub].orEmpty() + pkg))))
+    }
+}
+
+fun hubApps(ctx: Context, vm: LauncherVM, packages: List<String>, words: List<String>, hub: String? = null, icons: Boolean = true): List<HubApp> {
     val pm = ctx.packageManager
     val installed = vm.apps.map { it.pkg }.toSet()
     val byName = vm.apps.filter { a -> val l = a.label.lowercase(); words.any { l.contains(it) } }.map { it.pkg }
-    return (packages.filter { it in installed } + byName).distinct().map { p ->
-        val icon = runCatching {
+    val added = hub?.let { HubAppEdits.added(vm.store, it) }.orEmpty().filter { it in installed }
+    val removed = hub?.let { HubAppEdits.removed(vm.store, it) }.orEmpty()
+    return (added + packages.filter { it in installed } + byName).distinct().filter { it !in removed }.map { p ->
+        val icon = if (!icons) null else runCatching {
             val d = pm.getApplicationIcon(p)
             android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
                 val c = android.graphics.Canvas(b); d.setBounds(0, 0, 96, 96); d.draw(c)
@@ -201,6 +219,7 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
     val lastMap = vm.store.hubLastApp.value.lines().mapNotNull { l -> l.split('=').takeIf { it.size == 2 }?.let { it[0] to it[1] } }.toMap()
     val lastPkg = lastMap[hub]
     var list by remember { mutableStateOf<List<HubApp>?>(null) }
+    var picking by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     fun remember(p: String) = vm.store.hubLastApp.set((lastMap + (hub to p)).entries.joinToString("\n") { "${it.key}=${it.value}" })
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -209,17 +228,50 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
         }
         Box {
             // icons are drawn off the main thread; the menu opens when they're ready
-            Chip("apps ▾") { scope.launch { list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hubApps(ctx, vm, packages, words) } } }
+            val load = { scope.launch { list = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hubApps(ctx, vm, packages, words, hub) } } }
+            Chip("apps ▾") { load() }
             DropdownMenu(list != null, onDismissRequest = { list = null }) {
-                if (list?.isEmpty() == true) DropdownMenuItem(text = { Text("No apps found for this hub") }, onClick = { list = null })
+                if (list?.isEmpty() == true) DropdownMenuItem(text = { Text("No apps here yet") }, onClick = { list = null })
                 list?.forEach { a ->
                     DropdownMenuItem(text = { Text(a.label) },
                         leadingIcon = { a.icon?.let { Image(it, null, Modifier.size(28.dp)) } },
+                        // ✕ takes the app off this hub's list (it stays installed)
+                        trailingIcon = { Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                            HubAppEdits.remove(vm.store, hub, a.pkg); if (lastPkg == a.pkg) vm.store.hubLastApp.set((lastMap - hub).entries.joinToString("\n") { "${it.key}=${it.value}" }); load()
+                        }.padding(8.dp)) },
                         onClick = { list = null; remember(a.pkg); open(a) })
                 }
+                DropdownMenuItem(text = { Text("+ add an app…", color = Sand) }, onClick = { list = null; picking = true })
             }
         }
     }
+    if (picking) AppPicker(vm, exclude = remember(picking) { hubApps(ctx, vm, packages, words, hub, icons = false).map { it.pkg }.toSet() },
+        onPick = { HubAppEdits.add(vm.store, hub, it) }, onDismiss = { picking = false })
+}
+
+/** Choose any installed app (to add to a hub's list). */
+@Composable
+fun AppPicker(vm: LauncherVM, exclude: Set<String>, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+    var q by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add an app") },
+        text = {
+            Column {
+                androidx.compose.material3.OutlinedTextField(q, { q = it }, singleLine = true, label = { Text("Search") }, modifier = Modifier.fillMaxWidth())
+                LazyColumn(Modifier.height(360.dp).padding(top = 8.dp)) {
+                    val list = vm.apps.filter { it.pkg !in exclude && (q.isBlank() || it.label.contains(q.trim(), ignoreCase = true)) }.distinctBy { it.pkg }
+                    items(list.size) { i ->
+                        val a = list[i]
+                        Row(Modifier.fillMaxWidth().combinedClickable { onPick(a.pkg); onDismiss() }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            AppIcon(vm, a, 28.dp); Spacer(Modifier.size(12.dp)); Text(a.label, fontSize = 16.sp)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Close") } },
+    )
 }
 
 fun launchPkg(vm: LauncherVM, pkg: String) {
@@ -277,7 +329,7 @@ object MapHub : Hub {
 
 object WeatherHub : Hub {
     override val id = "weather"; override val title = "Weather"; override val glyph = "☁"
-    @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) = WeatherPage(vm, gestures)
+    @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) = ForecastPage(vm, active, gestures)
     @Composable override fun summary(vm: LauncherVM): String? = vm.weather?.let { w ->
         "${w.temp}° ${w.summary}" + (w.rainChance?.let { " · rain $it%" } ?: "") + " · wind ${w.wind} mph"
     }

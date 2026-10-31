@@ -158,6 +158,22 @@
   };
   window.hideTrack = () => { if (saved) { map.removeLayer(saved); saved = null; } };
 
+  // ---- A searched place and a route to it (Dune's own directions).
+  let placeM = null, route = null;
+  window.showPlace = (lat, lon, name) => {
+    if (placeM) map.removeLayer(placeM);
+    placeM = L.marker([lat, lon], { title: name }).addTo(map).bindTooltip(name, { permanent: true, direction: 'top', offset: [0, -8] });
+    follow = false; if (window.Dune) Dune.following(false);
+    map.flyTo([lat, lon], Math.max(map.getZoom(), 14), { duration: .6 });
+  };
+  window.showRoute = (pts) => {
+    if (route) map.removeLayer(route);
+    route = L.polyline(pts, { color: '#5fd38a', weight: 5, opacity: .9, interactive: false }).addTo(map);
+    follow = false; if (window.Dune) Dune.following(false);
+    map.fitBounds(route.getBounds(), { padding: [30, 30] });
+  };
+  window.clearPlace = () => { if (placeM) map.removeLayer(placeM); if (route) map.removeLayer(route); placeM = null; route = null; };
+
   window.centre = () => { follow = true; if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 15)); };
 </script>
 </body>

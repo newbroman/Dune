@@ -24,6 +24,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -124,6 +125,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
 
     var showing by remember { mutableStateOf<SavedTrack?>(null) }
     var showingPts by remember { mutableStateOf<List<TrackPoint>?>(null) }
+    // Things to draw once Dune's own map has loaded (e.g. after switching away from Mapy.com).
+    val pendingJs = remember { mutableListOf<String>() }
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
         WebView(act).apply {
@@ -142,6 +145,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                         here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null)
                         v.evaluateJavascript("setTrack(${trackJs(Tracks.points.value)})", null)
                         showingPts?.let { v.evaluateJavascript("showTrack(${trackJs(it)})", null) }   // a saved track asked for before the map loaded
+                        pendingJs.forEach { v.evaluateJavascript(it, null) }; pendingJs.clear()
                     }
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
@@ -293,6 +297,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 else web.evaluateJavascript("setAlign($align)", null)
             }
         }
+        PlaceSearch(vm, here, onDraw = { js ->
+            if (source.site != null) { pendingJs += js; show(MAP_SOURCES.first { it.id == "dark" }) } else web.evaluateJavascript(js, null)
+        })
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             when {
@@ -355,37 +362,27 @@ internal fun MapAction(label: String, onClick: () -> Unit) = Text(label, color =
 private fun push(web: WebView, l: Location) =
     web.evaluateJavascript("window.setPos && setPos(${l.latitude}, ${l.longitude}, ${maxOf(5f, l.accuracy)})", null)
 
-/** The weather page (four swipes left): your Weawow widgets, as big as you like. */
-@Composable
-fun WeatherPage(vm: LauncherVM, gestures: androidx.compose.ui.input.nestedscroll.NestedScrollConnection) {
-    val act = LocalContext.current as MainActivity
+/** Weather widgets (Weawow or any) on the weather hub, under Dune's own forecast. */
+fun androidx.compose.foundation.lazy.LazyListScope.weatherWidgets(vm: LauncherVM, act: MainActivity) {
     val placed = vm.store.weatherPage.value.split(',').mapNotNull { e ->
         e.split(':').let { p -> p[0].toIntOrNull()?.let { it to (p.getOrNull(1)?.toIntOrNull() ?: 200) } }
     }
     val am = android.appwidget.AppWidgetManager.getInstance(act)
-    SidePage("Weather", gestures) {
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                vm.weatherApp?.let { w -> Chip("Open Weawow") { vm.launch(w) } }
-                Chip("+ add a Weawow widget") { vm.addWeatherPageWidget() }
-            }
-            Row {
-                Chip("🌧 Rain radar") { vm.mapRequest = "radar"; vm.jumpHub = "map" }
-                Chip("Windy") { vm.mapRequest = "windy"; vm.jumpHub = "map" }
-            }
-            if (placed.isEmpty()) Note("Add one or more Weawow widgets – the large forecast and radar ones work well here. " +
-                "If Weawow isn't installed, any app's widgets are offered instead.")
+    item {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            vm.weatherApp?.let { w -> Chip("Open Weawow") { vm.launch(w) } }
+            Chip("+ add a widget") { vm.addWeatherPageWidget() }
         }
-        placed.forEach { (id, h) ->
-            item(key = "ww$id") {
-                val info = remember(id) { am.getAppWidgetInfo(id) }
-                if (info != null) {
-                    Box(Modifier.padding(top = 8.dp)) { HostedWidget(act, id, info, h) }
-                    Row {
-                        MapAction("taller") { act.editWeatherPage(id, 80) }
-                        MapAction("shorter") { act.editWeatherPage(id, -80) }
-                        MapAction("remove") { act.editWeatherPage(id, null) }
-                    }
+    }
+    placed.forEach { (id, h) ->
+        item(key = "ww$id") {
+            val info = remember(id) { am.getAppWidgetInfo(id) }
+            if (info != null) {
+                Box(Modifier.padding(top = 8.dp)) { HostedWidget(act, id, info, h) }
+                Row {
+                    MapAction("taller") { act.editWeatherPage(id, 80) }
+                    MapAction("shorter") { act.editWeatherPage(id, -80) }
+                    MapAction("remove") { act.editWeatherPage(id, null) }
                 }
             }
         }
@@ -423,3 +420,67 @@ fun openIn(ctx: Context, m: MapApp, l: Location?, place: String?) {
 }
 
 private fun trackJs(p: List<TrackPoint>) = p.joinToString(",", "[", "]") { "[${it.lat},${it.lon}]" }
+
+/** Find a place, show it, get walking / cycling / driving directions – Dune's own, no app needed. */
+@Composable
+private fun PlaceSearch(vm: LauncherVM, here: Location?, onDraw: (String) -> Unit) {
+    val act = LocalContext.current as MainActivity
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var q by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<Found>?>(null) }
+    var picked by remember { mutableStateOf<Found?>(null) }
+    var routeInfo by remember { mutableStateOf<String?>(null) }
+    var mode by remember { mutableStateOf("foot") }
+    val search = {
+        if (q.isNotBlank()) scope.launch { results = Routes.search(q.trim(), here?.latitude, here?.longitude); if (results?.isEmpty() == true) act.toast("Nothing found") }
+    }
+    Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 2.dp).border(1.dp, Faint, androidx.compose.foundation.shape.RoundedCornerShape(18.dp))
+        .padding(start = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.text.BasicTextField(q, { q = it }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = Fg, fontSize = 15.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(Sand),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { search() }),
+            modifier = Modifier.weight(1f).padding(vertical = 9.dp),
+            decorationBox = { inner -> Box { if (q.isEmpty()) Text("Find a place", color = Faint, fontSize = 15.sp); inner() } })
+        if (q.isNotEmpty() || picked != null) Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+            q = ""; results = null; picked = null; routeInfo = null; onDraw("clearPlace()")
+        }.padding(10.dp))
+        else Text("🎤", fontSize = 15.sp, modifier = Modifier.combinedClickable { act.listen("Where?") { it?.let { t -> q = t; search() } } }.padding(10.dp))
+    }
+    results?.let { list ->
+        Column(Modifier.padding(start = 24.dp, end = 12.dp)) {
+            list.forEach { f ->
+                Column(Modifier.fillMaxWidth().combinedClickable {
+                    picked = f; results = null; routeInfo = null
+                    onDraw("showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})")
+                }.padding(vertical = 6.dp)) {
+                    Text(f.name, color = Fg, fontSize = 15.sp, maxLines = 1)
+                    if (f.detail.isNotBlank()) Text(f.detail, color = Dim, fontSize = 12.sp, maxLines = 1)
+                }
+            }
+        }
+    }
+    picked?.let { f ->
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("foot" to "🚶", "bike" to "🚲", "car" to "🚗").forEach { (m, icon) ->
+                MapAction((if (mode == m && routeInfo != null) "● " else "") + icon) {
+                    val from = here ?: run { act.toast("Waiting for your location…"); return@MapAction }
+                    mode = m; routeInfo = "routing…"
+                    scope.launch {
+                        val r = Routes.route(from.latitude, from.longitude, f.lat, f.lon, m)
+                        if (r == null) { routeInfo = "no route found"; return@launch }
+                        routeInfo = String.format(Locale.UK, "%.1f km · %s", r.km, if (r.minutes >= 60) "${r.minutes / 60} h ${r.minutes % 60} min" else "${r.minutes} min")
+                        onDraw("showRoute(" + r.points.joinToString(",", "[", "]") { "[${it.first},${it.second}]" } + ")")
+                    }
+                }
+            }
+            Text(routeInfo ?: f.name, color = if (routeInfo != null) Sand else Dim, fontSize = 13.sp, maxLines = 1, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            // Turn-by-turn is best left to a navigation app: hand the destination over.
+            MapAction("go ↗") {
+                val gm = act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("google.navigation:q=${f.lat},${f.lon}&mode=" + when (mode) { "foot" -> "w"; "bike" -> "b"; else -> "d" }))
+                    .setPackage("com.google.android.apps.maps"))
+                if (!gm) act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${f.lat},${f.lon}?q=${f.lat},${f.lon}(" + Uri.encode(f.name) + ")")))
+            }
+        }
+    }
+}

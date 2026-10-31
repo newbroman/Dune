@@ -189,7 +189,7 @@ fun HomeScreen(vm: LauncherVM) {
         }
         4 -> InboxPage(vm, gestures)
         5 -> MapPage(vm, active = pager.currentPage == 5 && vm.screen == Screen.HOME)
-        6 -> WeatherPage(vm, gestures)
+        6 -> ForecastPage(vm, true, gestures)
         else -> LazyColumn(
             Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
             state = listState,

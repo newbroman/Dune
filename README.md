@@ -9,7 +9,9 @@
 > photos, videos, recordings and GPS tracks). The Map hub records **tracks** (● track; GPX to share). **Music** (2.3: what's playing in any app with cover art, progress
 > and controls; play anything by name in Spotify or YouTube Music, typed or spoken; BBC radio; recently played). **Connect** (2.4: Wi-Fi and nearby networks, Bluetooth devices,
 > a network scan that finds and names printers, speakers, computers and cameras with their setup pages, printer and speaker
-> set-up, speed test, public IP, VPN and L14 status). **Claude** (your Claude projects: open one in the Claude app, its GitHub repo's last push and build, ask about it). Coming: Agenda, Jobs,
+> set-up, speed test, public IP, VPN and L14 status). **Weather** is now Dune's own forecast (now, rain in the next two
+> hours, 24 hours, the week, sun and UV; widgets optional below), the **Map** finds places and gives walking, cycling and driving
+> routes, and every hub's *apps ▾* list can have apps added or removed. **Claude** (your Claude projects: open one in the Claude app, its GitHub repo's last push and build, ask about it). Coming: Agenda, Jobs,
 > Wallet, Learn, Machines. Releases carry both `Dune.apk` and `Dune2.apk`.
 
 Black, text-only home screen with: clock and date, weather (Open-Meteo, no API key),
