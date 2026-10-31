@@ -359,7 +359,7 @@ internal fun AssistantBlock(vm: LauncherVM) {
         Text(
             "🎤", fontSize = 22.sp,
             modifier = Modifier.combinedClickable(onLongClick = { act.tryStart(Intent(Intent.ACTION_VOICE_COMMAND)) }) {
-                act.listen("Ask Dune") { it?.let { t -> act.handleAsk(t) } }
+                act.listen("Ask Dune") { it?.let { t -> act.handleAsk(t, voice = true) } }
             }.padding(horizontal = 16.dp, vertical = 10.dp)
         )
     }
@@ -369,6 +369,8 @@ internal fun AssistantBlock(vm: LauncherVM) {
     }
     if (!Brain.ready(act)) vm.assistantFallback?.let { f ->
         FlowRow(Modifier.padding(top = 6.dp)) {
+            Chip("✦ Set up AI") { vm.assistantFallback = null; vm.assistantReply = null; vm.screen = Screen.SETTINGS
+                act.toast("Scroll down to “Dune AI” and paste your OpenRouter or OpenAI key") }
             Chip("Ask Claude") { Assistant.askClaude(act, f); vm.assistantFallback = null }
             Chip("Ask Gemini") { Assistant.askGemini(act, f); vm.assistantFallback = null }
             Chip("Google") { Assistant.askGoogle(act, f); vm.assistantFallback = null }

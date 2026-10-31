@@ -151,13 +151,13 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     /** Dune's AI (Brain): one question at a time; the answer goes to [onAnswer]. */
     var aiBusy by mutableStateOf(false)
-    fun askAi(question: String, speak: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
-        if (aiBusy) return
+    fun askAi(question: String, speak: Boolean = false, sayIt: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
+        if (aiBusy) { onAnswer("Still thinking about the last question…"); return }
         aiBusy = true; onAnswer("Thinking…")
         viewModelScope.launch {
             val a = try { Brain.ask(ctx, store, question, spoken = speak) } catch (e: Exception) { "AI: " + (e.message ?: "something went wrong") }
             aiBusy = false; onAnswer(a)
-            if (speak) Speaker.speak(ctx, a)
+            if (speak || sayIt) Speaker.speak(ctx, a)
         }
     }
     var inboxAnswer by mutableStateOf<String?>(null)

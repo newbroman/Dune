@@ -62,13 +62,17 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Run a typed or spoken request; in Drive mode the answer is spoken too. */
-    fun handleAsk(text: String, speak: Boolean = vm.screen == Screen.DRIVE) {
+    /** [voice]: asked out loud on the home screen, so the answer is read out too. */
+    fun handleAsk(text: String, speak: Boolean = vm.screen == Screen.DRIVE, voice: Boolean = false) {
         vm.assistantFallback = null
         val cmd = Assistant.interpret(text)
         // Anything Dune can't do itself goes to the AI, if one is set up.
-        if (cmd is Cmd.Unknown && Brain.ready(this)) { vm.askAi(text, speak); return }
+        if (cmd is Cmd.Unknown && Brain.ready(this)) { vm.askAi(text, speak, sayIt = voice); return }
         val reply = Assistant.run(this, vm, cmd)
-        vm.assistantReply = reply ?: if (vm.assistantFallback != null) "“${vm.assistantFallback}”" else null
+        vm.assistantReply = reply ?: if (vm.assistantFallback != null)
+            "“${vm.assistantFallback}” – Dune can't answer questions yet: no AI key is set up in this Dune (keys from the old Dune don't carry over). Tap “Set up AI”, or ask one of these:"
+            else null
+        if (voice && !speak) reply?.let { Speaker.speak(this, it) }
         if (speak) {
             if (reply != null && cmd !is Cmd.TimeInPolish && cmd !is Cmd.PhraseOfDay) Speaker.speak(this, reply)
             if (cmd is Cmd.Unknown) Speaker.speak(this, "Sorry, I can't do that one while you're driving")
