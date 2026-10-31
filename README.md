@@ -6,7 +6,8 @@
 > has messaged or emailed you this week, across apps, with reply / call / text / WhatsApp), **Tasks** (tasks and notes,
 > by voice too), and Dune's Map, Weather, Groups, Widgets and Rozmowa pages as hubs. **Record** (2.2: Dune's own camera – photo
 > and geotagged video into Pictures/Dune and Movies/Dune – an audio recorder that keeps going with the screen off, and a gallery of
-> photos, videos, recordings and GPS tracks). The Map hub records **tracks** (● track; GPX to share). Coming: Music, Agenda, Jobs,
+> photos, videos, recordings and GPS tracks). The Map hub records **tracks** (● track; GPX to share). **Music** (2.3: what's playing in any app with cover art, progress
+> and controls; play anything by name in Spotify or YouTube Music, typed or spoken; BBC radio; recently played). Coming: Connect, Agenda, Jobs,
 > Wallet, Learn, Machines. Releases carry both `Dune.apk` and `Dune2.apk`.
 
 Black, text-only home screen with: clock and date, weather (Open-Meteo, no API key),

@@ -72,10 +72,11 @@ interface Hub {
 }
 
 object Hubs {
-    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, RecordHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
+    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, MusicHub, RecordHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
     /** Hubs switched on by default; a new one in this list is added once, after an update. */
-    private val DEFAULT_ON = listOf("home", "comms", "tasks", "record", "map", "weather")
-    private val NEW_IN_2_2 = listOf("record")
+    private val DEFAULT_ON = listOf("home", "comms", "tasks", "music", "record", "map", "weather")
+    /** Hubs added after 2.1 (before this check existed), so phones updating from 2.0/2.1 are offered them. */
+    private val NEW_IN_2_2 = listOf("record", "music")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
     fun enabled(s: Store): List<Hub> {
@@ -113,6 +114,12 @@ fun HubScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
     LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != 0) pager.animateScrollToPage(0) }
+    // Keep an eye on what's playing (for Home's Music line and the recently-played list).
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        vm.media.onTrack = { t, a, p -> PlayHistory.add(ctx, Played(t, a, p, System.currentTimeMillis())) }
+        vm.media.start()
+        onDispose { vm.media.stop() }
+    }
     LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == 0) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
         val id = vm.jumpHub ?: return@LaunchedEffect

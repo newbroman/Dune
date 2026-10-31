@@ -1,5 +1,6 @@
 package uk.newbroman.dune
 
+import androidx.compose.runtime.mutableLongStateOf
 import android.Manifest
 import android.app.Activity
 import android.app.NotificationChannel
@@ -155,6 +156,18 @@ class MediaWatcher(private val ctx: Context) {
     var artist by mutableStateOf<String?>(null); private set
     var appPkg by mutableStateOf<String?>(null); private set
     var playing by mutableStateOf(false); private set
+    // For the Music hub: cover art, progress, and every app with a media session.
+    var art by mutableStateOf<android.graphics.Bitmap?>(null); private set
+    var album by mutableStateOf<String?>(null); private set
+    var durationMs by mutableLongStateOf(0L); private set
+    var positionMs by mutableLongStateOf(0L); private set
+    var positionAt by mutableLongStateOf(0L); private set
+    var speed by mutableFloatStateOf(1f); private set
+    var sessions by mutableStateOf<List<String>>(emptyList()); private set
+    /** Called with (title, artist, app) whenever a new track starts. */
+    var onTrack: ((String, String?, String) -> Unit)? = null
+    private var lastTrack: String? = null
+    private var users = 0
 
     private var controller: MediaController? = null
     private val msm = ctx.getSystemService(MediaSessionManager::class.java)
@@ -169,7 +182,9 @@ class MediaWatcher(private val ctx: Context) {
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { pick() }
     private var started = false
 
+    /** Drive mode and the Music hub can both be watching: only the last to stop really stops. */
     fun start() {
+        users++
         if (started) return
         try {
             msm.addOnActiveSessionsChangedListener(sessionsListener, component, handler)
@@ -179,7 +194,8 @@ class MediaWatcher(private val ctx: Context) {
     }
 
     fun stop() {
-        if (!started) return
+        users = (users - 1).coerceAtLeast(0)
+        if (users > 0 || !started) return
         runCatching { msm.removeOnActiveSessionsChangedListener(sessionsListener) }
         controller?.unregisterCallback(cb); controller = null; started = false
     }
@@ -191,9 +207,16 @@ class MediaWatcher(private val ctx: Context) {
         update()
     }
 
+    private var chosen: String? = null
+    /** Follow a particular app's session (the Music hub's app chips). */
+    fun choose(pkg: String) { chosen = pkg; pick() }
+    fun seekTo(ms: Long) { controller?.transportControls?.seekTo(ms); handler.postDelayed({ update() }, 300) }
+
     private fun pick() {
         val sessions = try { msm.getActiveSessions(component) } catch (e: SecurityException) { emptyList() }
-        val best = sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessions.firstOrNull()
+        this.sessions = sessions.map { it.packageName }.distinct()
+        val best = sessions.firstOrNull { it.packageName == chosen }
+            ?: sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessions.firstOrNull()
         if (best?.sessionToken != controller?.sessionToken) {
             controller?.unregisterCallback(cb)
             controller = best
@@ -209,6 +232,15 @@ class MediaWatcher(private val ctx: Context) {
         artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
         appPkg = c?.packageName
         playing = c?.playbackState?.state == PlaybackState.STATE_PLAYING
+        album = md?.getString(MediaMetadata.METADATA_KEY_ALBUM)
+        art = md?.let { it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON) }
+        durationMs = md?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0) ?: 0
+        val st = c?.playbackState
+        positionMs = st?.position?.coerceAtLeast(0) ?: 0
+        positionAt = st?.lastPositionUpdateTime ?: android.os.SystemClock.elapsedRealtime()
+        speed = st?.playbackSpeed?.takeIf { it > 0 } ?: 1f
+        val t = title; val p = appPkg
+        if (t != null && p != null && "$p|$t|$artist" != lastTrack) { lastTrack = "$p|$t|$artist"; onTrack?.invoke(t, artist, p) }
     }
 
     /** play, pause, toggle, next, previous. False when there's no media session to control. */
