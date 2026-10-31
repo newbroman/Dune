@@ -119,10 +119,16 @@ object Kind {
 object Brain {
     data class Provider(val id: String, val name: String, val url: String, val defaultModel: String, val keyHint: String)
     /** Where to get (or copy) a key for each provider. */
-    fun keyPage(id: String) = if (id == "openrouter") "https://openrouter.ai/settings/keys" else "https://platform.openai.com/api-keys"
+    fun keyPage(id: String) = when (id) {
+        "openrouter" -> "https://openrouter.ai/settings/keys"
+        "gemini" -> "https://aistudio.google.com/apikey"
+        else -> "https://platform.openai.com/api-keys"
+    }
     val PROVIDERS = listOf(
         Provider("openai", "OpenAI", "https://api.openai.com/v1/chat/completions", "gpt-5.4-mini", "sk-…  from platform.openai.com/api-keys"),
         Provider("openrouter", "OpenRouter", "https://openrouter.ai/api/v1/chat/completions", "openai/gpt-5.4-mini", "sk-or-…  from openrouter.ai/keys"),
+        // Google's Gemini, through its OpenAI-compatible endpoint (same request shape, Bearer key).
+        Provider("gemini", "Gemini", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "gemini-3.8-flash", "AIza…  from aistudio.google.com"),
     )
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("dune", 0)
@@ -209,7 +215,7 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         val body = JSONObject().put("model", model).put("messages", JSONArray()
             .put(JSONObject().put("role", "system").put("content", sys))
             .put(JSONObject().put("role", "user").put("content", question)))
-        if (Regex("^(openai/)?(gpt-5|o\\d)").containsMatchIn(model)) body.put("reasoning_effort", "low")
+        if (Regex("^(openai/)?(gpt-5|o\\d)").containsMatchIn(model) || (p.id == "gemini" && model.startsWith("gemini-3"))) body.put("reasoning_effort", "low")
         val c = URL(p.url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15_000; c.readTimeout = 60_000
         c.setRequestProperty("Content-Type", "application/json")
