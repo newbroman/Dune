@@ -117,6 +117,9 @@ class MainActivity : ComponentActivity() {
             // Replace whatever was in the weather spot.
             vm.store.weatherWidget.value.substringBefore(':').toIntOrNull()?.let { runCatching { widgetHost.deleteAppWidgetId(it) } }
             vm.store.weatherWidget.set("$id:${defaultWidgetHeight(this, info).coerceAtLeast(120)}")
+        } else if (vm.widgetTarget == "weatherPage") {
+            val list = vm.store.weatherPage.value.split(',').filter { it.isNotBlank() }
+            vm.store.weatherPage.set((list + "$id:${defaultWidgetHeight(this, info).coerceAtLeast(200)}").joinToString(","))
         } else vm.store.addWidget(id, defaultWidgetHeight(this, info))
         vm.widgetTarget = null
         pendingWidget = null
@@ -124,6 +127,19 @@ class MainActivity : ComponentActivity() {
     }
 
     fun removeWidget(id: Int) { widgetHost.deleteAppWidgetId(id); vm.store.dropWidget(id) }
+
+    /** Weather page: remove a widget, or change its height by [by] dp. */
+    fun editWeatherPage(id: Int, by: Int?) {
+        val list = vm.store.weatherPage.value.split(',').filter { it.isNotBlank() }
+        vm.store.weatherPage.set(list.mapNotNull { e ->
+            val (i, h) = e.split(':').let { (it[0].toIntOrNull() ?: -1) to (it.getOrNull(1)?.toIntOrNull() ?: 200) }
+            when {
+                i != id -> e
+                by == null -> { runCatching { widgetHost.deleteAppWidgetId(i) }; null }
+                else -> "$i:${(h + by).coerceIn(80, 900)}"
+            }
+        }.joinToString(","))
+    }
 
     /** Back to Dune's own weather. */
     fun clearWeatherWidget() {

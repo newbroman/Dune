@@ -103,13 +103,13 @@ fun WidgetPickerScreen(vm: LauncherVM) {
         }.sortedWith(compareBy({ it.third.lowercase() }, { it.second.lowercase() }))
             .let { all ->
                 // Choosing the weather widget: show only Weawow's widgets (if it has any).
-                if (vm.widgetTarget == "weather") all.filter { it.first.provider.packageName == WEAWOW || it.third.equals("weawow", true) }.ifEmpty { all }
+                if (vm.widgetTarget?.startsWith("weather") == true) all.filter { it.first.provider.packageName == WEAWOW || it.third.equals("weawow", true) }.ifEmpty { all }
                 else all
             }
     }
     var query by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().systemBarsPadding().padding(horizontal = 20.dp)) {
-        Text(if (vm.widgetTarget == "weather") "←  Choose a weather widget" else "←  Add a widget", color = Fg, fontSize = 22.sp,
+        Text(if (vm.widgetTarget?.startsWith("weather") == true) "←  Choose a weather widget" else "←  Add a widget", color = Fg, fontSize = 22.sp,
             modifier = Modifier.combinedClickable { vm.goHome() }.padding(top = 20.dp, bottom = 12.dp))
         androidx.compose.material3.OutlinedTextField(
             value = query, onValueChange = { query = it }, singleLine = true, label = { Text("Search, e.g. translate") },

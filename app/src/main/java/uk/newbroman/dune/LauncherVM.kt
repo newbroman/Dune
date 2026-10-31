@@ -491,6 +491,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     }
 
     fun chooseWeatherWidget() { widgetTarget = "weather"; screen = Screen.WIDGET_PICK }
+    fun addWeatherPageWidget() { widgetTarget = "weatherPage"; screen = Screen.WIDGET_PICK }
 
     fun goHome() {
         if (screen == Screen.SETTINGS) afterSettings()

@@ -10,6 +10,10 @@
   .leaflet-control-attribution { background: rgba(0,0,0,.55) !important; color: #8c877f; }
   .leaflet-control-attribution a { color: #b59a63; }
   .leaflet-bar a { background: #15140f; color: #ece8e1; border-color: #3a3733; }
+  /* Dune dark: OpenStreetMap turned to night colours (no key needed) */
+  .darkTiles { filter: invert(1) hue-rotate(180deg) brightness(.85) contrast(.9) saturate(.6); }
+  .legend { background: rgba(0,0,0,.7); color: #ece8e1; padding: 5px 7px; border-radius: 8px; line-height: 1.35; font-size: 10.5px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; margin-right: 6px; vertical-align: middle; }
   .me { width: 16px; height: 16px; border-radius: 50%; background: #d9b26a; border: 3px solid #000;
         box-shadow: 0 0 0 2px #d9b26a, 0 0 14px #d9b26a; }
 </style>
@@ -20,10 +24,22 @@
 <script>
   // Dune's map page: a dark map with you on it. Dune calls setPos() as the phone moves.
   const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([54.4, -3.0], 5);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    maxZoom: 19, subdomains: 'abcd',
-    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · © <a href="https://carto.com/attributions">CARTO</a>'
-  }).addTo(map);
+  const OSM = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+  const LAYERS = {
+    dark: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM, className: 'darkTiles' }],
+    osm:  ['https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: OSM }],
+    topo: ['https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', { maxZoom: 17, subdomains: 'abc', attribution: OSM + ' · <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)' }],
+    cycle:['https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', { maxZoom: 20, subdomains: 'abc', attribution: OSM + ' · <a href="https://www.cyclosm.org">CyclOSM</a>' }],
+    sat:  ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19, attribution: 'Imagery © Esri, Maxar, Earthstar Geographics' }],
+  };
+  let layer = null;
+  window.setLayer = (id) => {
+    const d = LAYERS[id] || LAYERS.dark;
+    if (layer) map.removeLayer(layer);
+    layer = L.tileLayer(d[0], d[1]).addTo(map);
+    document.body.style.background = id === 'dark' ? '#000' : '#ddd';
+  };
+  setLayer(new URLSearchParams(location.search).get('layer') || 'dark');
   const meIcon = L.divIcon({ className: '', html: '<div class="me"></div>', iconSize: [22, 22], iconAnchor: [11, 11] });
   let me = null, ring = null, follow = true, first = true;
   map.on('dragstart', () => { follow = false; if (window.Dune) Dune.following(false); });
@@ -33,9 +49,66 @@
     if (!me) { me = L.marker(p, { icon: meIcon, interactive: false }).addTo(map);
                ring = L.circle(p, { radius: acc, color: '#d9b26a', weight: 1, fillOpacity: .08, interactive: false }).addTo(map); }
     else { me.setLatLng(p); ring.setLatLng(p).setRadius(acc); }
-    if (first) { map.setView(p, 16); first = false; }
+    if (first) { map.setView(p, alOn ? 13 : 16); first = false; }
     else if (follow) map.panTo(p, { animate: true });
+    drawAlign();
   };
+  // ---- Solstice and alignment lines, as on the Spheres weather page: where the Sun and Moon rise
+  // and set on the days ancient monuments mark. Bearing from true north for a level horizon.
+  const R = Math.PI / 180, sinD = d => Math.sin(d * R), cosD = d => Math.cos(d * R);
+  const EPS = 23.436, XQ = Math.asin(sinD(EPS) * sinD(45)) / R, INC = 5.145;
+  const GROUPS = [
+    ['jun', 'June solstice', EPS, 0, '#ffcf5a', null],
+    ['dec', 'December solstice', -EPS, 0, '#ff8a4c', null],
+    ['eq', 'Equinoxes', 0, 0, '#f2efe6', null],
+    ['xqn', 'Beltane / Lughnasadh', XQ, 0, '#9fdc8a', '6 4'],
+    ['xqs', 'Samhain / Imbolc', -XQ, 0, '#c9a46a', '6 4'],
+    ['lmaj', 'Major lunar standstill', EPS + INC, 1, '#b9c8ff', '2 4'],
+    ['lmin', 'Minor lunar standstill', EPS - INC, 1, '#8ea0d8', '2 4'],
+  ];
+  function riseAz(lat, dec, moon) {
+    const h = moon ? 0.125 : -0.833, c = (sinD(dec) - sinD(lat) * sinD(h)) / (cosD(lat) * cosD(h));
+    return Math.abs(c) > 1 ? null : Math.acos(c) / R;
+  }
+  function dest(lat, lon, az, km) {
+    const d = km / 6371, a = az * R, p1 = lat * R, l1 = lon * R;
+    const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(a));
+    const l2 = l1 + Math.atan2(Math.sin(a) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+    return [p2 / R, l2 / R];
+  }
+  let alOn = false, alLayer = L.layerGroup().addTo(map), legend = null;
+  function drawAlign() {
+    alLayer.clearLayers();
+    if (!alOn || !me) return;
+    const o = me.getLatLng(), b = map.getBounds();
+    const km = Math.max(o.distanceTo(b.getNorthEast()), o.distanceTo(b.getSouthWest())) / 1000 * 1.2;
+    GROUPS.forEach(([id, name, dec, moon, col, dash]) => {
+      const decs = moon ? [dec, -dec] : [dec];
+      decs.forEach(dd => {
+        const A = riseAz(o.lat, dd, moon); if (A == null) return;
+        [A, 360 - A].forEach((az, i) => {
+          const pts = [[o.lat, o.lng]];
+          for (let k = 1; k <= 12; k++) pts.push(dest(o.lat, o.lng, az, km * k / 12));
+          L.polyline(pts, { color: col, weight: 3, opacity: .9, dashArray: dash, interactive: true })
+            .bindTooltip(name + ' ' + (moon ? (i ? 'moonset' : 'moonrise') : (i ? 'sunset' : 'sunrise')) + ' · ' + az.toFixed(1) + '°', { sticky: true })
+            .addTo(alLayer);
+        });
+      });
+    });
+  }
+  window.setAlign = (on) => {
+    alOn = on;
+    if (on && !legend) {
+      legend = L.control({ position: 'bottomleft' });
+      legend.onAdd = () => { const d = L.DomUtil.create('div', 'legend');
+        d.innerHTML = GROUPS.map(g => '<div><i style="background:' + g[4] + '"></i>' + g[1] + '</div>').join('') +
+          '<div style="color:#8c877f">rise → east, set → west; tap a line</div>'; return d; };
+    }
+    if (legend) { if (on) legend.addTo(map); else legend.remove(); }
+    drawAlign();
+  };
+  map.on('moveend zoomend', drawAlign);
+
   window.centre = () => { follow = true; if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 15)); };
 </script>
 </body>

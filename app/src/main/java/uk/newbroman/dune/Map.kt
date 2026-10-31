@@ -59,6 +59,28 @@ private fun hasFine(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.
 private fun hasAny(ctx: Context) = hasFine(ctx) ||
     ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+/** A choice in the map page's menu: a Mapy.com map (its own site) or a tile map drawn by Dune. */
+data class MapSource(val id: String, val label: String, val mapy: String? = null, val layer: String? = null)
+
+val MAP_SOURCES = listOf(
+    MapSource("mapy-basic", "Mapy.com", mapy = "basic"),
+    MapSource("mapy-outdoor", "Mapy.com · Outdoor", mapy = "outdoor"),
+    MapSource("mapy-aerial", "Mapy.com · Aerial", mapy = "aerial"),
+    MapSource("mapy-winter", "Mapy.com · Winter", mapy = "winter"),
+    MapSource("mapy-traffic", "Mapy.com · Traffic", mapy = "traffic"),
+    MapSource("dark", "Dune dark", layer = "dark"),
+    MapSource("osm", "OpenStreetMap", layer = "osm"),
+    MapSource("topo", "OpenTopoMap (contours)", layer = "topo"),
+    MapSource("cycle", "CyclOSM (cycling)", layer = "cycle"),
+    MapSource("sat", "Satellite (Esri)", layer = "sat"),
+)
+
+/** Mapy.com's documented link: centre is longitude first. */
+fun mapyUrl(mapset: String, l: Location?) = "https://mapy.com/fnc/v1/showmap?mapset=$mapset" +
+    (l?.let { String.format(Locale.US, "&center=%.6f,%.6f&zoom=16&marker=true", it.longitude, it.latitude) } ?: "")
+
+private const val LEAFLET = "https://appassets.androidplatform.net/assets/map/index.html"
+
 /** "53.13702, -4.36712" – five decimals is about a metre. */
 fun latLon(l: Location) = String.format(Locale.UK, "%.5f, %.5f", l.latitude, l.longitude)
 
@@ -76,16 +98,36 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     var here by remember { mutableStateOf<Location?>(null) }
     var place by remember { mutableStateOf<String?>(null) }
     var following by remember { mutableStateOf(true) }
+    val prefs = remember { act.getSharedPreferences("dune", 0) }
+    var source by remember { mutableStateOf(MAP_SOURCES.firstOrNull { it.id == prefs.getString("mapSource", "mapy-basic") } ?: MAP_SOURCES[0]) }
+    var picking by remember { mutableStateOf(false) }
+    var align by remember { mutableStateOf(prefs.getBoolean("mapAlign", false)) }
+    // Mapy.com is a whole site, so it is (re)loaded centred on you once a fix arrives.
+    var mapyCentred by remember { mutableStateOf(false) }
 
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
         WebView(act).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            settings.setGeolocationEnabled(true)
+            settings.userAgentString = settings.userAgentString + " Dune (github.com/newbroman/Dune)"   // tile servers ask apps to say who they are
             setBackgroundColor(android.graphics.Color.BLACK)
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? = loader.shouldInterceptRequest(r.url)
-                override fun onPageFinished(v: WebView, url: String?) { here?.let { push(v, it) } }
+                override fun onPageFinished(v: WebView, url: String?) {
+                    if (url?.startsWith(LEAFLET) == true) { here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null) }
+                }
+                override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
+                    val h = r.url.host ?: return false
+                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h == "appassets.androidplatform.net") return false
+                    act.tryStart(Intent(Intent.ACTION_VIEW, r.url)); return true
+                }
+            }
+            // Mapy.com's own "locate me" button: allowed when Dune itself has location.
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onGeolocationPermissionsShowPrompt(origin: String, cb: android.webkit.GeolocationPermissions.Callback) =
+                    cb.invoke(origin, hasAny(act), false)
             }
             addJavascriptInterface(object {
                 @JavascriptInterface fun following(on: Boolean) { post { following = on } }
@@ -95,8 +137,17 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) v.parent?.requestDisallowInterceptTouchEvent(true)
                 false
             }
-            loadUrl("https://appassets.androidplatform.net/assets/map/index.html")
+            loadUrl(source.mapy?.let { mapyUrl(it, null) } ?: "$LEAFLET?layer=${source.layer}")
         }
+    }
+    fun show(s: MapSource) {
+        source = s; prefs.edit().putString("mapSource", s.id).apply(); following = true
+        if (s.mapy != null) { web.loadUrl(mapyUrl(s.mapy, here)); mapyCentred = here != null }
+        else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}')", null)
+        else web.loadUrl("$LEAFLET?layer=${s.layer}")
+    }
+    LaunchedEffect(here != null) {
+        if (here != null && source.mapy != null && !mapyCentred) { web.loadUrl(mapyUrl(source.mapy!!, here)); mapyCentred = true }
     }
     DisposableEffect(Unit) { onDispose { web.destroy() } }
 
@@ -135,29 +186,49 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Map", color = Fg, fontSize = 22.sp, fontWeight = FontWeight.Light)
-            Spacer(Modifier.weight(1f))
-            if (here != null) {
-                if (!following) MapAction("centre") { web.evaluateJavascript("centre()", null); following = true }
-                MapAction("share") {
-                    val l = here!!
-                    val text = (place?.let { "$it\n" } ?: "") + "https://maps.google.com/?q=${l.latitude},${l.longitude}"
-                    act.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share my location"))
-                }
-                MapAction("Maps ↗") {
-                    val l = here!!
-                    act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=${l.latitude},${l.longitude}")))
+            Box {
+                Text(source.label + "  ▾", color = Fg, fontSize = 17.sp, fontWeight = FontWeight.Light, maxLines = 1,
+                    modifier = Modifier.combinedClickable { picking = true }.padding(vertical = 8.dp))
+                androidx.compose.material3.DropdownMenu(picking, onDismissRequest = { picking = false }) {
+                    MAP_SOURCES.forEach { s ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text((if (s.id == source.id) "● " else "    ") + s.label) },
+                            onClick = { picking = false; show(s) })
+                    }
                 }
             }
+            Spacer(Modifier.weight(1f))
+            // Solstice and lunar alignments, as on the Spheres weather page (Dune's own maps only).
+            MapAction(if (align) "☀ on" else "☀ lines") {
+                align = !align; prefs.edit().putBoolean("mapAlign", align).apply()
+                if (source.mapy != null) show(MAP_SOURCES.first { it.id == "dark" }.takeIf { align } ?: source)
+                else web.evaluateJavascript("setAlign($align)", null)
+            }
         }
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             when {
                 !any -> "Allow location to see where you are"
                 here == null -> if (active) "Finding you…" else " "
                 else -> listOfNotNull(place, latLon(here!!), "±${here!!.accuracy.toInt()} m").joinToString("  ·  ")
             },
-            color = Dim, fontSize = 13.sp, maxLines = 1, modifier = Modifier.padding(start = 24.dp, end = 12.dp, bottom = 6.dp)
+            color = Dim, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f)
         )
+            if (here != null) {
+                if (source.mapy != null) MapAction("centre") { web.loadUrl(mapyUrl(source.mapy!!, here)) }
+                else if (!following) MapAction("centre") { web.evaluateJavascript("centre()", null); following = true }
+                MapAction("share") {
+                    val l = here!!
+                    val text = (place?.let { "$it\n" } ?: "") + "https://maps.google.com/?q=${l.latitude},${l.longitude}"
+                    act.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share my location"))
+                }
+                if (source.mapy == null) MapAction("Maps ↗") {
+                    val l = here!!
+                    act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=${l.latitude},${l.longitude}")))
+                }
+            }
+        }
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
             // A strip down the left edge still swipes back to the inbox.
@@ -178,3 +249,36 @@ private fun MapAction(label: String, onClick: () -> Unit) = Text(label, color = 
 
 private fun push(web: WebView, l: Location) =
     web.evaluateJavascript("window.setPos && setPos(${l.latitude}, ${l.longitude}, ${maxOf(5f, l.accuracy)})", null)
+
+/** The weather page (four swipes left): your Weawow widgets, as big as you like. */
+@Composable
+fun WeatherPage(vm: LauncherVM, gestures: androidx.compose.ui.input.nestedscroll.NestedScrollConnection) {
+    val act = LocalContext.current as MainActivity
+    val placed = vm.store.weatherPage.value.split(',').mapNotNull { e ->
+        e.split(':').let { p -> p[0].toIntOrNull()?.let { it to (p.getOrNull(1)?.toIntOrNull() ?: 200) } }
+    }
+    val am = android.appwidget.AppWidgetManager.getInstance(act)
+    SidePage("Weather", gestures) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                vm.weatherApp?.let { w -> Chip("Open Weawow") { vm.launch(w) } }
+                Chip("+ add a Weawow widget") { vm.addWeatherPageWidget() }
+            }
+            if (placed.isEmpty()) Note("Add one or more Weawow widgets – the large forecast and radar ones work well here. " +
+                "If Weawow isn't installed, any app's widgets are offered instead.")
+        }
+        placed.forEach { (id, h) ->
+            item(key = "ww$id") {
+                val info = remember(id) { am.getAppWidgetInfo(id) }
+                if (info != null) {
+                    Box(Modifier.padding(top = 8.dp)) { HostedWidget(act, id, info, h) }
+                    Row {
+                        MapAction("taller") { act.editWeatherPage(id, 80) }
+                        MapAction("shorter") { act.editWeatherPage(id, -80) }
+                        MapAction("remove") { act.editWeatherPage(id, null) }
+                    }
+                }
+            }
+        }
+    }
+}

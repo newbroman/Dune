@@ -165,8 +165,8 @@ fun HomeScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
     // Three pages: swipe right for Groups, left for Widgets; home in the middle.
-    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox, 5 Map.
-    val pager = rememberPagerState(initialPage = HOME_PAGE) { 6 }
+    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox, 5 Map, 6 Weather.
+    val pager = rememberPagerState(initialPage = HOME_PAGE) { 7 }
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
     LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
@@ -188,6 +188,7 @@ fun HomeScreen(vm: LauncherVM) {
         }
         4 -> InboxPage(vm, gestures)
         5 -> MapPage(vm, active = pager.currentPage == 5 && vm.screen == Screen.HOME)
+        6 -> WeatherPage(vm, gestures)
         else -> LazyColumn(
             Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
             state = listState,
@@ -215,9 +216,9 @@ fun HomeScreen(vm: LauncherVM) {
       }
         // Page marker: groups · home · widgets (tap to jump)
         Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
-            listOf("rozmowa", "groups", "•", "widgets", "inbox", "map").forEachIndexed { i, l ->
-                Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 12.sp,
-                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 8.dp, vertical = 4.dp))
+            listOf("rozmowa", "groups", "•", "widgets", "inbox", "map", "weather").forEachIndexed { i, l ->
+                Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 11.sp,
+                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 5.dp, vertical = 4.dp))
             }
         }
         Row(

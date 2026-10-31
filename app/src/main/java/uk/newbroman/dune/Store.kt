@@ -86,6 +86,8 @@ class Store private constructor(ctx: Context) {
     val showCoinbase = Flag("showCoinbase", true)
     /** Widget shown in place of Dune's own weather, as "id:heightDp" (blank = Dune's weather). */
     val weatherWidget = Str("weatherWidget", "")
+    /** Widgets on the weather page (four swipes left), "id:heightDp" separated by commas. */
+    val weatherPage = Str("weatherPage", "")
 
     // Dock: the few apps used most, always at the bottom of the home screen
     var dock by mutableStateOf(readList("dock"))
