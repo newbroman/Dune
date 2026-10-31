@@ -90,7 +90,9 @@ object Net {
         val v4 = lp?.linkAddresses?.firstOrNull { it.address is Inet4Address }
         val gw = lp?.routes?.firstOrNull { it.isDefaultRoute && it.gateway is Inet4Address }?.gateway?.hostAddress
         @Suppress("DEPRECATION")
-        val info: WifiInfo? = (if (Build.VERSION.SDK_INT >= 31) caps?.transportInfo as? WifiInfo else null)
+        // NetworkCapabilities hides the network name; WifiManager still gives it to apps allowed precise location.
+        val fromWm = if (hasPerm(ctx, Manifest.permission.ACCESS_FINE_LOCATION)) ctx.applicationContext.getSystemService(WifiManager::class.java)?.connectionInfo else null
+        val info: WifiInfo? = fromWm ?: (if (Build.VERSION.SDK_INT >= 31) caps?.transportInfo as? WifiInfo else null)
             ?: ctx.applicationContext.getSystemService(WifiManager::class.java)?.connectionInfo
         val ssid = info?.ssid?.trim('"')?.takeIf { it.isNotBlank() && it != "<unknown ssid>" }
         return WifiNow(ssid, info?.rssi ?: -127, info?.linkSpeed ?: 0, info?.frequency ?: 0,
@@ -150,8 +152,9 @@ object Net {
     /** Download speed (Mbps) and latency (ms), using Cloudflare's speed-test server. */
     suspend fun speed(onProgress: (String) -> Unit): Pair<Double, Long>? = withContext(Dispatchers.IO) {
         runCatching {
+            val addr = InetSocketAddress(InetAddress.getByName("speed.cloudflare.com"), 443)   // look up the name first, so ping is just the trip
             val t0 = System.currentTimeMillis()
-            Socket().use { it.connect(InetSocketAddress("speed.cloudflare.com", 443), 4000) }
+            Socket().use { it.connect(addr, 4000) }
             val ping = System.currentTimeMillis() - t0
             val c = URL("https://speed.cloudflare.com/__down?bytes=25000000").openConnection() as HttpURLConnection
             c.connectTimeout = 6000; c.readTimeout = 15000
@@ -170,12 +173,15 @@ object Net {
     }
 
     /** Knock on each address: a reply *or a refusal* means something is there. */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val scanIo = Dispatchers.IO.limitedParallelism(64)   // its own threads, so the rest of Dune isn't starved
+
     suspend fun scan(ip: String, prefix: Int, progress: (Int, Int) -> Unit): List<LanHost> = coroutineScope {
         val targets = Lan.hosts(ip, prefix)
-        val gate = Semaphore(96)
+        val gate = Semaphore(64)
         var done = 0
         val found = targets.map { host ->
-            async(Dispatchers.IO) {
+            async(scanIo) {
                 gate.withPermit {
                     var alive = false; val open = HashSet<Int>()
                     // Quick check on a few ports first; only look closer at hosts that answer.
@@ -189,12 +195,14 @@ object Net {
             }
         }.awaitAll().filterNotNull()
         // Names, from the router's DNS where it has them.
-        found.map { h ->
-            async(Dispatchers.IO) {
-                val n = withTimeoutOrNull(1500) { runCatching { InetAddress.getByName(h.ip).canonicalHostName }.getOrNull() }
-                h.copy(name = n?.takeIf { it != h.ip }?.removeSuffix(".lan")?.removeSuffix(".home")?.removeSuffix(".local"))
-            }
-        }.awaitAll()
+        // A blocking lookup can't be cancelled, so each runs on its own and we stop waiting after 1.5 s.
+        val lookups = found.map { h -> h to async(scanIo) { runCatching { InetAddress.getByName(h.ip).canonicalHostName }.getOrNull() } }
+        val deadline = System.currentTimeMillis() + 1500
+        lookups.map { (h, d) ->
+            val n = withTimeoutOrNull((deadline - System.currentTimeMillis()).coerceAtLeast(1)) { d.await() }
+            if (n == null) d.cancel()
+            h.copy(name = n?.takeIf { it != h.ip }?.removeSuffix(".lan")?.removeSuffix(".home")?.removeSuffix(".local"))
+        }
     }
 
     /** 1 open, 0 refused (but alive), -1 nothing there. */
@@ -220,27 +228,28 @@ object Net {
             }.also { l -> runCatching { nsd.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, l) } }
         }
         // Resolve one at a time (Android only allows one resolve in flight on older versions).
-        withContext(Dispatchers.IO) {
+        try { withContext(Dispatchers.IO) {
             val end = System.currentTimeMillis() + seconds * 1000
-            while (System.currentTimeMillis() < end) {
+            while (System.currentTimeMillis() < end && kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.isActive != false) {
                 val s = pending.poll(300, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
                 val lock = java.util.concurrent.CountDownLatch(1)
-                @Suppress("DEPRECATION")
-                runCatching {
-                    nsd.resolveService(s, object : NsdManager.ResolveListener {
-                        override fun onResolveFailed(si: NsdServiceInfo, e: Int) { lock.countDown() }
-                        override fun onServiceResolved(si: NsdServiceInfo) {
-                            @Suppress("DEPRECATION") val ip = si.host?.hostAddress
-                            if (ip != null && si.host is Inet4Address) found.getOrPut(ip) { java.util.concurrent.ConcurrentHashMap.newKeySet() }
-                                .add(si.serviceType.trim('.').substringBefore("._tcp") + ":" + si.serviceName)
-                            lock.countDown()
-                        }
-                    })
+                val rl = object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(si: NsdServiceInfo, e: Int) { lock.countDown() }
+                    override fun onServiceResolved(si: NsdServiceInfo) {
+                        @Suppress("DEPRECATION")
+                        val v4 = (if (Build.VERSION.SDK_INT >= 34) si.hostAddresses else listOfNotNull(si.host)).firstOrNull { it is Inet4Address }
+                        val ip = v4?.hostAddress
+                        if (ip != null) found.getOrPut(ip) { java.util.concurrent.ConcurrentHashMap.newKeySet() }
+                            .add(si.serviceType.trim('.').substringBefore("._tcp") + ":" + si.serviceName)
+                        lock.countDown()
+                    }
                 }
-                lock.await(2, java.util.concurrent.TimeUnit.SECONDS)
+                @Suppress("DEPRECATION") runCatching { nsd.resolveService(s, rl) }.onFailure { lock.countDown() }
+                if (!lock.await(2, java.util.concurrent.TimeUnit.SECONDS) && Build.VERSION.SDK_INT >= 34) runCatching { nsd.stopServiceResolution(rl) }
             }
+        } } finally {
+            listeners.forEach { runCatching { nsd.stopServiceDiscovery(it) } }   // also when the page goes away mid-scan
         }
-        listeners.forEach { runCatching { nsd.stopServiceDiscovery(it) } }
         return found
     }
 

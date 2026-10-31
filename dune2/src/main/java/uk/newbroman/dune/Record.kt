@@ -404,6 +404,9 @@ object Gallery {
     }
 
     fun view(ctx: Context, uri: Uri) = ctx.tryStart(Intent(Intent.ACTION_VIEW, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+    fun shareAll(ctx: Context, uris: List<Uri>, mime: String) = if (uris.size == 1) share(ctx, uris[0], mime) else
+        ctx.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND_MULTIPLE).setType(mime)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     fun share(ctx: Context, uri: Uri, mime: String) = ctx.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType(mime)
         .putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
@@ -458,6 +461,10 @@ object RecordHub : Hub {
             }.distinct().filter { it != act.packageName }
         }
         var tab by rememberSaveable { mutableStateOf("photos") }
+        // Long-press anything to start selecting; then tap to add or remove. Keys: content URIs, or track file paths.
+        val sel = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+        androidx.compose.runtime.LaunchedEffect(tab) { sel.clear() }
+        val toggle: (String) -> Unit = { k -> if (k in sel) sel.remove(k) else sel.add(k) }
         var duneOnly by rememberSaveable { mutableStateOf(false) }
         var canRead by remember { mutableStateOf(Gallery.canRead(act)) }
         val tick by Gallery.changed.collectAsState()
@@ -497,6 +504,23 @@ object RecordHub : Hub {
                         Text(l, color = if (tab == k) Sand else Dim, fontSize = 15.sp, modifier = Modifier.combinedClickable { tab = k }.padding(end = 16.dp, top = 6.dp, bottom = 6.dp))
                     }
                 }
+                if (sel.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).border(1.dp, Sand, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("${sel.size} selected", color = Fg, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                    val keys = sel.toList()
+                    Text("share", color = Sand, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                        if (tab == "tracks") Tracks.shareAll(act, keys.map { java.io.File(it) })
+                        else Gallery.shareAll(act, keys.map { Uri.parse(it) }, when (tab) { "videos" -> "video/*"; "audio" -> "audio/*"; else -> "image/*" })
+                    }.padding(10.dp))
+                    Text("delete", color = Color(0xFFFF7A6A), fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                        if (tab == "tracks") { keys.forEach { Tracks.delete(java.io.File(it)) }; sel.clear() }
+                        else act.deleteMedia(keys.map { Uri.parse(it) }) { ok -> if (ok) { sel.clear(); Gallery.changed.value++ } }
+                    }.padding(10.dp))
+                    Text("all", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                        sel.clear(); sel.addAll(if (tab == "tracks") tracks.map { it.file.absolutePath } else items.map { it.uri.toString() })
+                    }.padding(10.dp))
+                    Text("✕", color = Dim, fontSize = 15.sp, modifier = Modifier.combinedClickable { sel.clear() }.padding(10.dp))
+                }
                 if (tab == "photos" || tab == "videos") Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (duneOnly || !canRead) "● Dune's only" else "○ Dune's only", color = Dim, fontSize = 13.sp,
                         modifier = Modifier.combinedClickable { duneOnly = !duneOnly }.padding(vertical = 4.dp))
@@ -509,18 +533,18 @@ object RecordHub : Hub {
                 "photos", "videos" -> items.chunked(3).forEachIndexed { r, row ->
                     item(key = "g$tab$r") {
                         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            row.forEach { m -> Thumb(m, Modifier.weight(1f)) }
+                            row.forEach { m -> Thumb(m, Modifier.weight(1f), m.uri.toString() in sel, sel.isNotEmpty()) { toggle(m.uri.toString()) } }
                             repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
                         }
                     }
                 }
                 "audio" -> {
                     if (items.isEmpty()) item { Note("Your recordings will appear here.") }
-                    items.forEach { m -> item(key = "a" + m.uri) { AudioRow(m) } }
+                    items.forEach { m -> item(key = "a" + m.uri) { AudioRow(m, m.uri.toString() in sel, sel.isNotEmpty()) { toggle(m.uri.toString()) } } }
                 }
                 else -> {
                     if (tracks.isEmpty()) item { Note("Record a track from the Map hub (● track) and it will appear here.") }
-                    tracks.forEach { t -> item(key = "t" + t.file.name) { TrackRow(vm, t) } }
+                    tracks.forEach { t -> item(key = "t" + t.file.name) { TrackRow(vm, t, t.file.absolutePath in sel, sel.isNotEmpty()) { toggle(t.file.absolutePath) } } }
                 }
             }
             if ((tab == "photos" || tab == "videos") && items.isEmpty()) item {
@@ -565,28 +589,28 @@ private fun AudioMeter() {
 }
 
 @Composable
-private fun Thumb(m: MediaItem, modifier: Modifier) {
+private fun Thumb(m: MediaItem, modifier: Modifier, selected: Boolean, selecting: Boolean, toggle: () -> Unit) {
     val act = LocalContext.current
     val bmp by produceState<ImageBitmap?>(null, m.uri) { value = Gallery.thumb(act, m.uri) }
-    var menu by remember { mutableStateOf(false) }
     Box(modifier.aspectRatio(1f).background(Color(0xFF15140F), RoundedCornerShape(6.dp))
-        .combinedClickable(onLongClick = { menu = true }, onClick = { Gallery.view(act, m.uri) })) {
-        bmp?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
+        .then(if (selected) Modifier.border(3.dp, Sand, RoundedCornerShape(6.dp)) else Modifier)
+        .combinedClickable(onLongClick = toggle, onClick = { if (selecting) toggle() else Gallery.view(act, m.uri) })) {
+        bmp?.let { Image(it, null, Modifier.fillMaxSize().padding(if (selected) 6.dp else 0.dp), contentScale = ContentScale.Crop) }
         if (m.video) Text("▶ " + dur(m.durationMs), color = Color.White, fontSize = 11.sp,
             modifier = Modifier.align(Alignment.BottomStart).background(Color(0x99000000)).padding(horizontal = 4.dp, vertical = 1.dp))
-        DropdownMenu(menu, onDismissRequest = { menu = false }) {
-            DropdownMenuItem(text = { Text("Open") }, onClick = { menu = false; Gallery.view(act, m.uri) })
-            DropdownMenuItem(text = { Text("Share") }, onClick = { menu = false; Gallery.share(act, m.uri, if (m.video) "video/*" else "image/*") })
-        }
+        if (selecting) Text(if (selected) "●" else "○", color = if (selected) Sand else Color.White, fontSize = 18.sp,
+            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp))
     }
 }
 
 @Composable
-private fun AudioRow(m: MediaItem) {
+private fun AudioRow(m: MediaItem, selected: Boolean, selecting: Boolean, toggle: () -> Unit) {
     val act = LocalContext.current
     val playing by Player.playing.collectAsState()
     val on = playing == m.uri
-    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().combinedClickable(onLongClick = toggle, onClick = { if (selecting) toggle() else Player.toggle(act, m.uri) })
+        .padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (selecting) Text(if (selected) "● " else "○ ", color = if (selected) Sand else Dim, fontSize = 18.sp)
         Text(if (on) "■" else "▶", color = Sand, fontSize = 20.sp, modifier = Modifier.combinedClickable { Player.toggle(act, m.uri) }.padding(end = 14.dp))
         Column(Modifier.weight(1f)) {
             Text(m.name.removeSuffix(".m4a"), color = Fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -597,10 +621,11 @@ private fun AudioRow(m: MediaItem) {
 }
 
 @Composable
-private fun TrackRow(vm: LauncherVM, t: SavedTrack) {
+private fun TrackRow(vm: LauncherVM, t: SavedTrack, selected: Boolean, selecting: Boolean, toggle: () -> Unit) {
     val act = LocalContext.current
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f).combinedClickable { vm.mapTrackRequest = t.file.absolutePath; vm.jumpHub = "map" }) {
+        if (selecting) Text(if (selected) "● " else "○ ", color = if (selected) Sand else Dim, fontSize = 18.sp, modifier = Modifier.combinedClickable(onClick = toggle))
+        Column(Modifier.weight(1f).combinedClickable(onLongClick = toggle, onClick = { if (selecting) toggle() else { vm.mapTrackRequest = t.file.absolutePath; vm.jumpHub = "map" } })) {
             Text(t.name.removePrefix("Track "), color = Fg, fontSize = 15.sp, maxLines = 1)
             Text(String.format(Locale.UK, "%.2f km · %d min", t.km, t.minutes), color = Dim, fontSize = 12.sp)
         }

@@ -126,6 +126,14 @@ object Tracks {
 
     fun delete(f: File) { f.delete(); saved.value++ }
 
+    fun shareAll(ctx: Context, files: List<File>) {
+        if (files.size == 1) return share(ctx, files[0])
+        val uris = ArrayList(files.map { FileProvider.getUriForFile(ctx, ctx.packageName + ".files", it) })
+        ctx.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND_MULTIPLE).setType("application/gpx+xml")
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Share tracks")
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     /** "2.41 km · 38 min · 4.1 km/h · ↑ 63 m" */
     fun stats(p: List<TrackPoint>): String {
         val km = TrackMath.km(p); val min = TrackMath.minutes(p)

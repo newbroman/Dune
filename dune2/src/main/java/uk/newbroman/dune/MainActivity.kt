@@ -185,6 +185,34 @@ class MainActivity : ComponentActivity() {
         permsLauncher.launch(permissions)
     }
 
+    // ---- deleting photos, videos and recordings (Android asks you to confirm; it can be undone from the Bin)
+    private var deleteCallback: ((Boolean) -> Unit)? = null
+    private val deleteLauncher = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) {
+        val cb = deleteCallback; deleteCallback = null; cb?.invoke(it.resultCode == RESULT_OK)
+    }
+    fun deleteMedia(uris: List<android.net.Uri>, cb: (Boolean) -> Unit) {
+        if (uris.isEmpty()) return cb(false)
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            runCatching {
+                val pi = android.provider.MediaStore.createDeleteRequest(contentResolver, uris)
+                deleteCallback = cb
+                deleteLauncher.launch(androidx.activity.result.IntentSenderRequest.Builder(pi.intentSender).build())
+            }.onFailure { deleteCallback = null; toast("Couldn't delete: ${it.message}"); cb(false) }
+            return
+        }
+        // Older Android: delete directly; on 10, Android may ask first for files another app made.
+        var ok = true
+        for (u in uris) {
+            try { contentResolver.delete(u, null, null) }
+            catch (e: SecurityException) {
+                val rse = if (android.os.Build.VERSION.SDK_INT >= 29) e as? android.app.RecoverableSecurityException else null
+                if (rse != null) { deleteCallback = cb; deleteLauncher.launch(androidx.activity.result.IntentSenderRequest.Builder(rse.userAction.actionIntent.intentSender).build()); return }
+                ok = false
+            }
+        }
+        cb(ok)
+    }
+
     fun requestPerm(permission: String, cb: (Boolean) -> Unit) {
         permCallback = cb
         permLauncher.launch(permission)
@@ -234,5 +262,6 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.onResume()
+        vm.media.listen()   // notification access may have just been granted
     }
 }

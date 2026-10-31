@@ -218,9 +218,9 @@ private fun NowPlaying(vm: LauncherVM) {
     }
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
         Ctl("⏮", 30) { m.control("previous") }
-        if (m.durationMs > 0) Ctl("−15", 16) { m.seekTo((m.positionMs - 15_000).coerceAtLeast(0)) }
+        if (m.durationMs > 0) Ctl("−15", 16) { m.seekBy(-15_000) }
         Ctl(if (m.playing) "❚❚" else "▶", 40, big = true) { m.control("toggle") }
-        if (m.durationMs > 0) Ctl("+30", 16) { m.seekTo((m.positionMs + 30_000).coerceAtMost(m.durationMs)) }
+        if (m.durationMs > 0) Ctl("+30", 16) { m.seekBy(30_000) }
         Ctl("⏭", 30) { m.control("next") }
     }
 }

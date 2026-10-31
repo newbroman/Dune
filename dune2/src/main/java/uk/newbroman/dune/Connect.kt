@@ -73,6 +73,7 @@ object ConnectHub : Hub {
         val scope = rememberCoroutineScope()
         var showNearby by remember { mutableStateOf(false) }
         var nearby by remember { mutableStateOf<List<Nearby>>(emptyList()) }
+        var nearbyNote by remember { mutableStateOf<String?>(null) }
         var publicIp by remember { mutableStateOf<String?>(null) }
         var speed by remember { mutableStateOf<String?>(null) }
         var scanState by remember { mutableStateOf<String?>(null) }
@@ -93,8 +94,10 @@ object ConnectHub : Hub {
                     Text((w.ssid ?: "Connected") + "   " + "▂▄▆█".take(Lan.bars(w.rssi)).padEnd(4, '·'), color = Fg, fontSize = 18.sp)
                     Text(listOfNotNull("${w.rssi} dBm", w.linkMbps.takeIf { it > 0 }?.let { "$it Mbps link" }, Lan.band(w.mhz).ifBlank { null }).joinToString(" · "), color = Dim, fontSize = 13.sp)
                     Text(listOfNotNull(w.ip?.let { "This phone $it" }, w.gateway?.let { "router $it" }).joinToString(" · "), color = Dim, fontSize = 13.sp)
-                    if (w.ssid == null) LinkRow("Allow location to see the network's name") {
-                        act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { tick++ }
+                    if (w.ssid == null) {
+                        if (!hasPerm(act, Manifest.permission.ACCESS_FINE_LOCATION)) LinkRow("Allow precise location to see the network's name") {
+                            act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { tick++ }
+                        } else Note("Android hides the network's name while Location is switched off.")
                     }
                     w.gateway?.let { g -> LinkRow("Router settings (http://$g)") { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("http://$g"))) } }
                 }
@@ -102,16 +105,24 @@ object ConnectHub : Hub {
                     Chip(if (showNearby) "hide nearby networks" else "nearby networks") {
                         showNearby = !showNearby
                         if (showNearby) {
-                            val need = if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES, Manifest.permission.ACCESS_FINE_LOCATION)
-                                       else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-                            act.requestPerms(need) { scope.launch { nearby = withContext(Dispatchers.IO) { Net.nearby(act) } } }
+                            nearbyNote = "Scanning…"
+                            val need = arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) +
+                                (if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.NEARBY_WIFI_DEVICES) else emptyArray())
+                            act.requestPerms(need) { _ ->
+                                if (!hasPerm(act, Manifest.permission.ACCESS_FINE_LOCATION)) { nearbyNote = "Android only lists nearby networks for apps allowed precise location."; return@requestPerms }
+                                scope.launch {
+                                    // Results can be a little stale (Android limits scans); try again once after a few seconds.
+                                    repeat(2) { n -> nearby = withContext(Dispatchers.IO) { Net.nearby(act) }; if (nearby.isEmpty() && n == 0) delay(5000) }
+                                    nearbyNote = if (nearby.isEmpty()) "No networks found yet – Android limits how often Wi-Fi can be scanned; try again in a minute." else null
+                                }
+                            }
                         }
                     }
                     Chip("internet panel") { act.tryStart(Intent(if (Build.VERSION.SDK_INT >= 29) Settings.Panel.ACTION_INTERNET_CONNECTIVITY else Settings.ACTION_WIRELESS_SETTINGS)) }
                     Chip("hotspot") { act.tryStart(Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings")) || act.tryStart(Intent(Settings.ACTION_WIRELESS_SETTINGS)) }
                 }
                 if (showNearby) {
-                    if (nearby.isEmpty()) Note("Scanning… (Android limits how often Wi-Fi can be scanned)")
+                    nearbyNote?.let { Note(it) }
                     nearby.take(15).forEach { n ->
                         Text("▂▄▆█".take(Lan.bars(n.rssi)).padEnd(4, '·') + "  " + n.ssid + (if (n.secure) "  🔒" else "  open") + "  " + Lan.band(n.mhz),
                             color = if (n.ssid == wifi?.ssid) Sand else Fg, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,

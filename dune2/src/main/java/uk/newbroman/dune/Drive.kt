@@ -166,7 +166,7 @@ class MediaWatcher(private val ctx: Context) {
     var sessions by mutableStateOf<List<String>>(emptyList()); private set
     /** Called with (title, artist, app) whenever a new track starts. */
     var onTrack: ((String, String?, String) -> Unit)? = null
-    private var lastTrack: String? = null
+    private var lastTrack: String? = ctx.getSharedPreferences("dune", 0).getString("lastTrack", null)
     private var users = 0
 
     private var controller: MediaController? = null
@@ -175,17 +175,19 @@ class MediaWatcher(private val ctx: Context) {
     private val handler = Handler(Looper.getMainLooper())
 
     private val cb = object : MediaController.Callback() {
-        override fun onMetadataChanged(metadata: MediaMetadata?) = update()
-        override fun onPlaybackStateChanged(state: PlaybackState?) = update()
+        override fun onMetadataChanged(metadata: MediaMetadata?) = update(metadata, controller?.playbackState, newArt = true)
+        override fun onPlaybackStateChanged(state: PlaybackState?) = update(lastMeta, state, newArt = false)
         override fun onSessionDestroyed() { pick() }
     }
     private val sessionsListener = MediaSessionManager.OnActiveSessionsChangedListener { pick() }
     private var started = false
 
     /** Drive mode and the Music hub can both be watching: only the last to stop really stops. */
-    fun start() {
-        users++
-        if (started) return
+    fun start() { users++; listen() }
+
+    /** Begin listening if we can (notification access may arrive later: called again on resume). */
+    fun listen() {
+        if (started || users == 0) return
         try {
             msm.addOnActiveSessionsChangedListener(sessionsListener, component, handler)
             started = true
@@ -210,48 +212,62 @@ class MediaWatcher(private val ctx: Context) {
     private var chosen: String? = null
     /** Follow a particular app's session (the Music hub's app chips). */
     fun choose(pkg: String) { chosen = pkg; pick() }
-    fun seekTo(ms: Long) { controller?.transportControls?.seekTo(ms); handler.postDelayed({ update() }, 300) }
+    /** Where playback is now, worked out from the session's last report. */
+    fun nowMs(): Long = (if (playing) positionMs + ((android.os.SystemClock.elapsedRealtime() - positionAt) * speed).toLong() else positionMs)
+        .coerceIn(0, if (durationMs > 0) durationMs else Long.MAX_VALUE)
+    fun seekBy(deltaMs: Long) = seekTo((nowMs() + deltaMs).coerceIn(0, if (durationMs > 0) durationMs else Long.MAX_VALUE))
+    fun seekTo(ms: Long) { controller?.transportControls?.seekTo(ms); handler.postDelayed({ refresh() }, 300) }
 
     private fun pick() {
         val sessions = try { msm.getActiveSessions(component) } catch (e: SecurityException) { emptyList() }
         this.sessions = sessions.map { it.packageName }.distinct()
+        val playingNow = sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+        if (chosen != null && playingNow != null && playingNow.packageName != chosen &&
+            sessions.firstOrNull { it.packageName == chosen }?.playbackState?.state != PlaybackState.STATE_PLAYING) chosen = null
         val best = sessions.firstOrNull { it.packageName == chosen }
             ?: sessions.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: sessions.firstOrNull()
         if (best?.sessionToken != controller?.sessionToken) {
             controller?.unregisterCallback(cb)
             controller = best
             best?.registerCallback(cb, handler)
-        }
-        update()
+            refresh()
+        } else update(lastMeta ?: best?.metadata, best?.playbackState, newArt = false)
     }
 
-    private fun update() {
+    private var lastMeta: MediaMetadata? = null
+    private fun refresh() { val c = controller; update(c?.metadata, c?.playbackState, newArt = true) }
+    private fun update() = refresh()
+
+    private fun update(md: MediaMetadata?, st: PlaybackState?, newArt: Boolean) {
         val c = controller
-        val md = c?.metadata
+        lastMeta = md
         title = md?.getString(MediaMetadata.METADATA_KEY_TITLE) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_TITLE)
         artist = md?.getString(MediaMetadata.METADATA_KEY_ARTIST) ?: md?.getString(MediaMetadata.METADATA_KEY_DISPLAY_SUBTITLE)
         appPkg = c?.packageName
-        playing = c?.playbackState?.state == PlaybackState.STATE_PLAYING
+        playing = st?.state == PlaybackState.STATE_PLAYING
         album = md?.getString(MediaMetadata.METADATA_KEY_ALBUM)
-        art = md?.let { it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON) }
+        if (newArt) art = md?.let { it.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_ART) ?: it.getBitmap(MediaMetadata.METADATA_KEY_DISPLAY_ICON) }
         durationMs = md?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0) ?: 0
-        val st = c?.playbackState
         positionMs = st?.position?.coerceAtLeast(0) ?: 0
         positionAt = st?.lastPositionUpdateTime ?: android.os.SystemClock.elapsedRealtime()
         speed = st?.playbackSpeed?.takeIf { it > 0 } ?: 1f
         val t = title; val p = appPkg
-        if (t != null && p != null && "$p|$t|$artist" != lastTrack) { lastTrack = "$p|$t|$artist"; onTrack?.invoke(t, artist, p) }
+        val key = "$p|$t|$artist"
+        if (t != null && p != null && playing && key != lastTrack) {
+            lastTrack = key; ctx.getSharedPreferences("dune", 0).edit().putString("lastTrack", key).apply()
+            onTrack?.invoke(t, artist, p)
+        }
     }
 
     /** play, pause, toggle, next, previous. False when there's no media session to control. */
     fun control(action: String): Boolean {
-        if (!started) { start(); if (!started) pickOnce() } else pick()
+        if (!started) { users++; listen(); users--; if (!started) pickOnce() } else pick()
         val t = controller?.transportControls ?: return false
         when (action) {
             "play" -> t.play(); "pause" -> t.pause(); "next" -> t.skipToNext(); "previous" -> t.skipToPrevious()
             "toggle" -> if (playing) t.pause() else t.play()
         }
-        handler.postDelayed({ update() }, 400)
+        handler.postDelayed({ refresh() }, 400)
         return true
     }
 }
