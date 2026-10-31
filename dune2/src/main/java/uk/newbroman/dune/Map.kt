@@ -113,6 +113,7 @@ fun latLon(l: Location) = String.format(Locale.UK, "%.5f, %.5f", l.latitude, l.l
 fun MapPage(vm: LauncherVM, active: Boolean) {
     val act = LocalContext.current as MainActivity
     var granted by remember { mutableIntStateOf(0) }
+    var mapCrashed by remember { mutableIntStateOf(0) }   // the map page's renderer died: a fresh WebView is made
     val fine = remember(granted, vm.resumeTick) { hasFine(act) }
     val any = remember(granted, vm.resumeTick) { hasAny(act) }
     var here by remember { mutableStateOf<Location?>(null) }
@@ -146,8 +147,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     val exportToQField = remember { booleanArrayOf(false) }
     val gisScope = androidx.compose.runtime.rememberCoroutineScope()
     // The bridge below is only answered while Dune's own map is showing, not Mapy.com or Windy.
-    val ownPage = remember { BooleanArray(1) }
-    val web = remember {
+    val ownPage = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val pendingJs = remember { ArrayList<String>() }   // map calls waiting for Dune's own map to load
+    val web = remember(mapCrashed) {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act))
             .addPathHandler("/gis/", WebViewAssetLoader.InternalStoragePathHandler(act, Gis.dir(act))).build()
         WebView(act).apply {
@@ -161,7 +163,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             setBackgroundColor(android.graphics.Color.BLACK)
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? = loader.shouldInterceptRequest(r.url)
-                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) { ready[0] = false; ownPage[0] = url?.startsWith(LEAFLET) == true }
+                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) { ready[0] = false; ownPage.set(url?.startsWith(LEAFLET) == true) }
                 override fun onPageFinished(v: WebView, url: String?) {
                     ready[0] = url?.startsWith(LEAFLET) == true
                     if (url?.startsWith(LEAFLET) == true) {
@@ -171,9 +173,15 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                         placeShown?.let { f -> v.evaluateJavascript("showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})", null) }
                         routeShown?.let { r -> v.evaluateJavascript("showRoute(${routeJs(r)})", null) }
                         v.evaluateJavascript("gisSetLayers(${Gis.toJs(layers)})", null)
-                        val sv = Gis.surveyFile(act).takeIf { it.exists() }?.readText()
-                        if (sv != null) v.evaluateJavascript("gisSetSurvey($sv)", null)
+                        Gis.readSurvey(act)?.let { v.evaluateJavascript("gisSetSurvey(${org.json.JSONObject.quote(it)})", null) }
+                        pendingJs.forEach { v.evaluateJavascript(it, null) }; pendingJs.clear()
                     }
+                }
+                override fun onRenderProcessGone(v: WebView, d: android.webkit.RenderProcessGoneDetail): Boolean {
+                    // The map's page ran out of memory (a huge layer): switch file layers off so it can't loop, and say so.
+                    ready[0] = false
+                    android.os.Handler(Looper.getMainLooper()).post { mapCrashed++ }
+                    return true
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val h = r.url.host ?: return false
@@ -188,22 +196,24 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             }
             addJavascriptInterface(object {
                 @JavascriptInterface fun following(on: Boolean) { post { following = on } }
-                @JavascriptInterface fun grid(g: String) { if (!ownPage[0]) return; post { grid = g.ifEmpty { null } } }
-                @JavascriptInterface fun layerStatus(id: String, s: String) { if (!ownPage[0]) return; post { layerStatus[id] = s } }
-                @JavascriptInterface fun surveyCount(n: Int) { if (!ownPage[0]) return; post { surveyCount = n } }
-                @JavascriptInterface fun measuring(on: Boolean) { if (!ownPage[0]) return; post { measuring = on } }
-                @JavascriptInterface fun toast(s: String) { if (!ownPage[0]) return; post { act.toast(s) } }
+                @JavascriptInterface fun grid(g: String) { if (!ownPage.get()) return; post { grid = g.ifEmpty { null } } }
+                @JavascriptInterface fun layerStatus(id: String, s: String) { if (!ownPage.get()) return; post { layerStatus[id] = s } }
+                @JavascriptInterface fun surveyCount(n: Int) { if (!ownPage.get()) return; post { surveyCount = n } }
+                @JavascriptInterface fun measuring(on: Boolean) { if (!ownPage.get()) return; post { measuring = on } }
+                @JavascriptInterface fun toast(s: String) { if (!ownPage.get()) return; post { act.toast(s) } }
                 @JavascriptInterface fun gisReady() {}
-                @JavascriptInterface fun copy(s: String) { if (!ownPage[0]) return; post {
+                @JavascriptInterface fun layerLoaded(id: String) {}
+                @JavascriptInterface fun copy(s: String) { if (!ownPage.get()) return; post {
                     act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Grid reference", s))
                     act.toast("Copied") } }
-                @JavascriptInterface fun surveySaved(json: String) { if (!ownPage[0]) return; runCatching { Gis.surveyFile(act).writeText(json) } }
-                @JavascriptInterface fun openLogger(well: String) { if (!ownPage[0]) return; post { openWellLogger(vm, act, well) } }
-                @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) { if (!ownPage[0]) return; post {
+                @JavascriptInterface fun surveySaved(json: String) { if (!ownPage.get()) return; Gis.writeSurvey(act, json) }
+                @JavascriptInterface fun openLogger(well: String) { if (!ownPage.get()) return; post { openWellLogger(vm, act, well) } }
+                @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) { if (!ownPage.get()) return; post {
                     gisScope.launch {
-                        val u = Gis.saveExport(act, name, mime, android.util.Base64.decode(b64, android.util.Base64.DEFAULT))
+                        val bytes = runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+                        val u = bytes?.let { Gis.saveExport(act, name, mime, it) }
                         when {
-                            u == null -> act.toast("Couldn't save $name")
+                            u == null -> { exportToQField[0] = false; act.toast("Couldn't save $name") }
                             exportToQField[0] -> { exportToQField[0] = false; Gis.sendToQField(act, u, mime) }
                             else -> { act.toast("Saved to Downloads/Dune: $name"); Gis.share(act, u, mime, "Share the survey") }
                         }
@@ -224,9 +234,11 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}'); setRadar(${s.radar})", null)
         else web.loadUrl(leafletUrl(s))
     }
+    /** Runs on Dune's own map, switching to it (and waiting for it to load) if a website map is showing. */
     fun dune(js: String) {
-        if (source.site != null) { show(MAP_SOURCES.first { it.id == "dark" }); web.postDelayed({ web.evaluateJavascript(js, null) }, 1500) }
-        else web.evaluateJavascript(js, null)
+        if (ready[0]) { web.evaluateJavascript(js, null); return }
+        pendingJs += js
+        if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
     }
     fun setLayers(l: List<Gis.Layer>) {
         layers = l; Gis.save(act, l)
@@ -268,6 +280,11 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         else if (ready[0]) web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
         }
     }
+    LaunchedEffect(mapCrashed) {
+        if (mapCrashed == 0) return@LaunchedEffect
+        setLayers(layers.map { if (it.kind == "file") it.copy(on = false) else it })
+        act.toast("The map ran out of memory – file layers are switched off. Turn them on one at a time.")
+    }
     LaunchedEffect(vm.gisImport) {
         val u = vm.gisImport ?: return@LaunchedEffect
         vm.gisImport = null
@@ -279,7 +296,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     LaunchedEffect(here != null) {
         if (here != null && source.site != null && !siteCentred) { web.loadUrl(source.site!!.invoke(here)); siteCentred = true }
     }
-    DisposableEffect(Unit) { onDispose { web.destroy() } }
+    DisposableEffect(web) { onDispose { web.destroy() } }
 
     // Location updates only while this page is showing.
     DisposableEffect(active, any) {
@@ -402,7 +419,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
                 SurveyMenu(surveyOpen, surveyCount, gridOn, onDismiss = { surveyOpen = false }, js = { dune(it) },
                     onGrid = { gridOn = !gridOn; prefs.edit().putBoolean("mapGrid", gridOn).apply() },
-                    onExport = { fmt, qf -> exportToQField[0] = qf; web.evaluateJavascript("gisExport('$fmt')", null) })
+                    onExport = { fmt, qf -> exportToQField[0] = qf; dune("gisExport('$fmt')") })
             }
             Text("wells", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable(
                 onClick = { openWellLogger(vm, act) }, onLongClick = { openWellLogger(vm, act, installed = true) }).padding(horizontal = 8.dp, vertical = 10.dp))
@@ -435,7 +452,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             onZoom = { l -> showLayers = false; web.postDelayed({ if (ready[0]) web.evaluateJavascript("gisZoom('${l.id}')", null) }, if (ready[0]) 300 else 2500) },
             onAddFiles = { act.pickFiles { importFiles(it) } }, onClose = { showLayers = false })
         Box(Modifier.fillMaxWidth().weight(1f)) {
-            AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
+            androidx.compose.runtime.key(web) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
             // A strip down the left edge still swipes back to the inbox.
             Box(Modifier.width(26.dp).fillMaxHeight().pointerInput(Unit) { })
             // …and one down the right edge, since in Dune 2 the map may have hubs on both sides.

@@ -115,10 +115,14 @@ class MainActivity : ComponentActivity() {
 
     /** A map file opened with Dune from another app (Files, Drive, email): add it to the map's layers. */
     private fun openedFile(intent: Intent?): Boolean {
-        if (intent?.action != Intent.ACTION_VIEW && intent?.action != Intent.ACTION_SEND) return false
+        val act = intent?.action
+        if (act != Intent.ACTION_VIEW && act != Intent.ACTION_SEND && act != Intent.ACTION_SEND_MULTIPLE) return false
         @Suppress("DEPRECATION")
-        val u = intent.data ?: intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM) ?: return false
-        vm.gisImport = listOf(u); vm.jumpHub = "map"
+        val all = (listOfNotNull(intent.data, intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM)) +
+            (intent.getParcelableArrayListExtra<android.net.Uri>(Intent.EXTRA_STREAM) ?: emptyList()))
+            .filter { it.scheme == "content" }   // never file:// – that could point into Dune's own private files
+        if (all.isEmpty()) return false
+        vm.gisImport = all.distinct(); vm.jumpHub = "map"
         intent.action = Intent.ACTION_MAIN; intent.data = null
         return true
     }

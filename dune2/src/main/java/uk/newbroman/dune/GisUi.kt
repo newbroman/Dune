@@ -147,7 +147,7 @@ private fun WmsSheet(onAdd: (String, String, String, String?, Double) -> Unit, o
             item { Note("Ready to use (Wales and Britain):") }
             items(WMS_PRESETS) { p -> LinkRow(p.label) { onAdd(p.label, p.url, p.layers, p.attr, p.opacity) } }
             item {
-                Note("Or any WMS address – Dune reads the list of its layers:")
+                Note("Or any WMS address (https only) – Dune reads the list of its layers:")
                 OutlinedTextField(url, { url = it; found = null }, singleLine = true, placeholder = { Text("https://…/wms") }, modifier = Modifier.fillMaxWidth())
                 LinkRow("Find its layers") {
                     msg = "Asking the server…"; found = null
@@ -158,7 +158,7 @@ private fun WmsSheet(onAdd: (String, String, String, String?, Double) -> Unit, o
                 }
                 msg?.let { Note(it) }
             }
-            found?.let { list -> items(list) { (n, t) -> LinkRow(t) { onAdd(t, url.substringBefore('?').trim(), n, url.substringAfter("//").substringBefore('/'), 0.7) } } }
+            found?.let { list -> items(list) { (n, t) -> LinkRow(t) { onAdd(t, Gis.wmsBase(url), n, url.substringAfter("//").substringBefore('/'), 0.7) } } }
         }
     }
 }

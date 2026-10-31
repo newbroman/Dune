@@ -205,6 +205,7 @@
           if (geometry) feats.push({ type: 'Feature', geometry, properties: r });
         }
         st.free();
+        if (feats.length >= MAX_FEATURES) call('toast', t + ': only the first ' + MAX_FEATURES.toLocaleString('en-GB') + ' features are drawn');
         let gj = fc(feats);
         return { name: t, gj: reproject(gj, from || (looksProjected(gj) ? 'EPSG:27700' : null)) };
       });
@@ -280,6 +281,7 @@
     Object.keys(shown).forEach(id => { if (!ids.has(id)) { if (shown[id].layer) map.removeLayer(shown[id].layer); delete shown[id]; } });
     for (const def of list) {
       let s = shown[def.id];
+      if (s && !s.layer) s.def = def;   // still loading or never loaded: just remember the latest wish (e.g. on/off)
       if (s && JSON.stringify(s.def) !== JSON.stringify(def) && s.layer) {
         // A change of opacity or colour only: restyle without reloading the file.
         if (def.kind === 'wms' && s.layer.setOpacity) s.layer.setOpacity(def.wms.opacity == null ? .7 : def.wms.opacity);
@@ -291,6 +293,7 @@
         s.loading = load(def).then(l => {
           s.layer = l; s.loading = null;
           if (shown[def.id] === s && s.def.on) l.addTo(map);
+          call('layerLoaded', def.id);
           call('layerStatus', def.id, def.kind === 'wms' ? 'web map' : (l._count + ' feature' + (l._count === 1 ? '' : 's')));
           if (def.zoom && l.getBounds && l.getBounds().isValid()) zoomTo(l);
         }).catch(e => { s.loading = null; call('layerStatus', def.id, '⚠ ' + (e.message || e)); });
@@ -301,6 +304,7 @@
     }
     // Keep web maps under the drawn layers, in list order.
     list.filter(d => d.kind === 'wms').forEach((d, i) => { const l = shown[d.id] && shown[d.id].layer; if (l && l.setZIndex) l.setZIndex(10 + i); });
+    list.filter(d => d.kind !== 'wms').forEach(d => { const l = shown[d.id] && shown[d.id].layer; if (l && l.bringToFront && map.hasLayer(l)) l.bringToFront(); });
   };
   function zoomTo(l) { follow = false; call('following', false); map.fitBounds(l.getBounds(), { padding: [24, 24], maxZoom: 18 }); }
   window.gisZoom = id => { const s = shown[id]; if (s && s.layer && s.layer.getBounds && s.layer.getBounds().isValid()) zoomTo(s.layer); };
@@ -325,7 +329,8 @@
   }).addTo(map);
   function redrawSurvey() { surveyLayer.clearLayers(); surveyLayer.addData(survey); }
   function saveSurvey() { redrawSurvey(); call('surveySaved', JSON.stringify(survey)); call('surveyCount', survey.features.length); }
-  window.gisSetSurvey = (gj) => { survey = gj && gj.features ? gj : fc([]); redrawSurvey(); call('surveyCount', survey.features.length); };
+  window.gisSetSurvey = (gj) => { if (typeof gj === 'string') { try { gj = JSON.parse(gj); } catch (e) { call('toast', 'The saved survey couldn\'t be read'); return; } }
+    survey = gj && gj.features ? gj : fc([]); redrawSurvey(); call('surveyCount', survey.features.length); };
   window.gisDeleteSurvey = uid => { map.closePopup(); survey.features = survey.features.filter(f => f.properties.uid !== uid); saveSurvey(); };
   window.gisClearSurvey = () => { survey = fc([]); saveSurvey(); };
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -341,12 +346,13 @@
   // Points: at your GPS position, at the map centre, or where you long-pressed.
   window.gisAddPoint = (where, lat, lon) => {
     let ll, acc = null, alt = null;
+    endMeasure(); if (window.__pin) { map.removeLayer(window.__pin); window.__pin = null; }
     if (where === 'gps') { if (!me) { call('toast', 'No GPS fix yet'); return; } ll = me.getLatLng(); acc = Math.round(window.meAcc || 0); alt = window.meAlt; }
     else if (where === 'at') ll = L.latLng(lat, lon);
     else ll = map.getCenter();
     map.closePopup();
     const g = gridRef(ll.lat, ll.lng), name = nextName('P');
-    const pin = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: '#ff9b3d', fillOpacity: 1 }).addTo(map);
+    const pin = window.__pin = L.circleMarker(ll, { radius: 8, color: '#fff', weight: 2, fillColor: '#ff9b3d', fillOpacity: 1 }).addTo(map);
     showPanel('<b>New point</b><div class="gpc">' + (g || '') + '<br>' + ll.lat.toFixed(6) + ', ' + ll.lng.toFixed(6) +
       (acc ? '<br>±' + acc + ' m (GPS)' : where === 'centre' ? '<br>(map centre)' : '') + '</div>' +
       '<input id="sp_name" value="' + name + '" placeholder="Name"><textarea id="sp_note" rows="2" placeholder="Note"></textarea>' +
@@ -410,6 +416,7 @@
   function endMeasure() { if (!meas) return; map.removeLayer(meas.layer); meas = null; hidePanel(); map.getContainer().style.cursor = ''; call('measuring', false); }
   window.gisEndMeasure = endMeasure;
   map.on('click', e => { if (meas) { meas.pts.push(e.latlng); measDraw(); } });
+  map.on('popupopen', e => { if (meas && e.popup._source) { map.closePopup(); meas.pts.push(e.popup.getLatLng()); measDraw(); } });
 
   // Long-press anywhere: its grid reference, with survey tools for that spot.
   map.on('contextmenu', e => {

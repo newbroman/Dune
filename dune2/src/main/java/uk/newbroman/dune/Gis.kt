@@ -57,11 +57,32 @@ object Gis {
     fun surveyFile(ctx: Context) = File(dir(ctx), "survey.geojson")
 
     fun load(ctx: Context): List<Layer> {
-        val f = listFile(ctx)
-        if (!f.exists()) return listOf(WELLS)
-        return runCatching { JSONArray(f.readText()).let { a -> (0 until a.length()).map { Layer.of(a.getJSONObject(it)) } } }.getOrDefault(listOf(WELLS))
+        val f = android.util.AtomicFile(listFile(ctx))
+        if (!listFile(ctx).exists()) return listOf(WELLS)
+        return runCatching { JSONArray(f.readFully().decodeToString()).let { a -> (0 until a.length()).map { Layer.of(a.getJSONObject(it)) } } }
+            .getOrElse {
+                // Unreadable list: rebuild it from the files that are there, rather than losing them.
+                listOf(WELLS) + (dir(ctx).listFiles() ?: emptyArray()).filter { fmtOf(it.name) != null && it.name != "survey.geojson" && it.name != "layers.json" }
+                    .mapIndexed { i, file -> Layer("r$i" + file.name.hashCode().toString(36), file.nameWithoutExtension, "file", file.name, fmtOf(file.name), COLORS[i % COLORS.size], false) }
+            }
     }
-    fun save(ctx: Context, list: List<Layer>) { listFile(ctx).writeText(JSONArray(list.map { it.json() }).toString()) }
+    fun save(ctx: Context, list: List<Layer>) = writeAtomic(listFile(ctx), JSONArray(list.map { it.json() }).toString())
+
+    private fun writeAtomic(file: File, text: String) = synchronized(this) {
+        val f = android.util.AtomicFile(file)
+        val out = f.startWrite()
+        try { out.write(text.toByteArray()); f.finishWrite(out) } catch (e: Exception) { f.failWrite(out) }
+    }
+    /** The survey, written whole or not at all (with the previous one kept as a .bak). */
+    fun writeSurvey(ctx: Context, json: String) {
+        if (runCatching { JSONObject(json).getJSONArray("features") }.isFailure) return
+        val f = surveyFile(ctx)
+        if (f.exists()) runCatching { f.copyTo(File(dir(ctx), "survey.bak.geojson"), overwrite = true) }
+        writeAtomic(f, json)
+    }
+    fun readSurvey(ctx: Context): String? = runCatching {
+        android.util.AtomicFile(surveyFile(ctx)).readFully().decodeToString().also { JSONObject(it).getJSONArray("features") }
+    }.getOrNull() ?: runCatching { File(dir(ctx), "survey.bak.geojson").readText().also { JSONObject(it).getJSONArray("features") } }.getOrNull()
     fun toJs(list: List<Layer>): String = JSONArray(list.map { it.js() }).toString()
 
     /** The format Dune reads a file as, from its name; null if it isn't a map file. */
@@ -89,7 +110,8 @@ object Gis {
         val out = ArrayList<Layer>(); val bad = ArrayList<String>()
         var ci = existing.size
         fun add(name: String, file: String, fmt: String) {
-            out += Layer("f" + System.currentTimeMillis().toString(36) + out.size, name, "file", file, fmt, COLORS[ci++ % COLORS.size])
+            val big = File(d, file).length() > 40L * 1024 * 1024   // very large files could exhaust the map page's memory
+            out += Layer("f" + System.currentTimeMillis().toString(36) + out.size, name, "file", file, fmt, COLORS[ci++ % COLORS.size], on = !big)
         }
         fun unique(n: String): String { var f = safe(n); var i = 1; while (File(d, f).exists()) f = safe(n).let { it.substringBeforeLast('.') + "-" + i++ + "." + it.substringAfterLast('.') }; return f }
         // shapefiles: group the parts by name
@@ -116,7 +138,8 @@ object Gis {
     fun delete(ctx: Context, l: Layer) { l.file?.let { File(dir(ctx), it).delete() } }
 
     // ---- Saving what the map exports (the survey): into Downloads/Dune, then offered to share.
-    suspend fun saveExport(ctx: Context, name: String, mime: String, bytes: ByteArray): Uri? = withContext(Dispatchers.IO) {
+    suspend fun saveExport(ctx: Context, name0: String, mime: String, bytes: ByteArray): Uri? = withContext(Dispatchers.IO) {
+        val name = safe(File(name0).name).ifBlank { "download" }
         runCatching {
             if (Build.VERSION.SDK_INT >= 29) {
                 val v = ContentValues().apply {
@@ -167,11 +190,18 @@ object Gis {
 
     /** Layers a WMS offers, read from its GetCapabilities: name to title. */
     suspend fun wmsLayers(base: String): List<Pair<String, String>> = withContext(Dispatchers.IO) {
-        val u = base.trim().let { if (it.contains('?')) it.substringBefore('?') else it }
-        val c = URL("$u?service=WMS&request=GetCapabilities").openConnection() as HttpURLConnection
+        val u = wmsBase(base)
+        val c = URL(u + (if (u.contains('?')) "&" else "?") + "service=WMS&request=GetCapabilities").openConnection() as HttpURLConnection
         c.connectTimeout = 12_000; c.readTimeout = 20_000
         c.setRequestProperty("User-Agent", "Dune (github.com/newbroman/Dune)")
         c.inputStream.use { parseCapabilities(it.readBytes().decodeToString()) }
+    }
+
+    /** A WMS address without its own WMS request parameters, but keeping others (e.g. MapServer's map=). */
+    fun wmsBase(url: String): String {
+        val t = url.trim(); val q = t.substringAfter('?', "")
+        val keep = q.split('&').filter { it.isNotBlank() && it.substringBefore('=').lowercase() !in setOf("service", "request", "version", "layers", "format", "srs", "crs", "bbox", "width", "height", "styles", "transparent") }
+        return t.substringBefore('?') + if (keep.isEmpty()) "" else "?" + keep.joinToString("&")
     }
 
     /** The named layers in a WMS capabilities document (the ones that can be drawn), name to title. */
@@ -180,16 +210,21 @@ object Gis {
         p.setInput(xml.reader())
         val out = ArrayList<Pair<String, String>>()
         val stack = ArrayList<Array<String?>>()   // per <Layer>: name, title
+        var depth = 0; val layerDepth = ArrayList<Int>()
         var text = StringBuilder(); var ev = p.eventType
         while (ev != XmlPullParser.END_DOCUMENT) {
             val tag = p.name?.substringAfter(':')
             when (ev) {
-                XmlPullParser.START_TAG -> { if (tag == "Layer") stack += arrayOfNulls<String>(2); text = StringBuilder() }
+                XmlPullParser.START_TAG -> { depth++; if (tag == "Layer") { stack += arrayOfNulls<String>(2); layerDepth += depth }; text = StringBuilder() }
                 XmlPullParser.TEXT -> text.append(p.text)
-                XmlPullParser.END_TAG -> when (tag) {
-                    "Name" -> stack.lastOrNull()?.let { if (it[0] == null) it[0] = text.toString().trim() }
-                    "Title" -> stack.lastOrNull()?.let { if (it[1] == null) it[1] = text.toString().trim() }
-                    "Layer" -> stack.removeAt(stack.size - 1).let { (n, t) -> if (!n.isNullOrBlank()) out += n to (t ?: n) }
+                XmlPullParser.END_TAG -> {
+                    val direct = layerDepth.isNotEmpty() && depth == layerDepth.last() + 1   // a child of the Layer itself, not of its Style
+                    when (tag) {
+                        "Name" -> if (direct) stack.last().let { if (it[0] == null) it[0] = text.toString().trim() }
+                        "Title" -> if (direct) stack.last().let { if (it[1] == null) it[1] = text.toString().trim() }
+                        "Layer" -> { layerDepth.removeAt(layerDepth.size - 1); stack.removeAt(stack.size - 1).let { (n, t) -> if (!n.isNullOrBlank()) out += n to (t ?: n) } }
+                    }
+                    depth--
                 }
             }
             ev = p.next()
