@@ -77,6 +77,8 @@ class Store private constructor(ctx: Context) {
     val showSky = Flag("showSky", true)
     /** Behind the home hubs: your phone's wallpaper (darkened a little so text stays readable), or Dune's sky. */
     val useWallpaper = Flag("useWallpaper", false)
+    /** The hub to the left of Home ("" for none): Groups by default, as in Dune 1. */
+    val leftHub = Str("leftHub", "apps")
     /** A still picture of the sky on the lock screen (SkyWallpaper reads the same key). */
     val skyLock = Flag("skyLock", false)
     val skyCompass = Flag("skyCompass", true)

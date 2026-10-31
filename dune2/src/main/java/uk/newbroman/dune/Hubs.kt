@@ -93,9 +93,13 @@ object Hubs {
                 s.hubsKnown.set((known + fresh).joinToString(","))
             }
         }
-        return (listOf("home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" })
+        val left = leftOf(s)
+        return (listOfNotNull(left, "home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" && it != left })
             .distinct().mapNotNull { byId(it) }
     }
+    /** The hub one swipe to the left of Home (Groups, as in Dune 1), or null for none. */
+    fun leftOf(s: Store): String? = s.leftHub.value.takeIf { it.isNotEmpty() && it != "home" && byId(it) != null }
+    fun homeIndex(s: Store) = if (leftOf(s) != null) 1 else 0
     fun setEnabled(s: Store, ids: List<String>) = s.hubs.set((listOf("home") + ids.filter { it != "home" }).distinct().joinToString(","))
 }
 
@@ -106,7 +110,8 @@ fun HubScreen(vm: LauncherVM) {
     val ctx = LocalContext.current
     val s = vm.store
     val hubs = Hubs.enabled(s)
-    val pager = rememberPagerState { hubs.size }
+    val homeAt = Hubs.homeIndex(s)
+    val pager = rememberPagerState(initialPage = homeAt) { hubs.size }
     val scope = rememberCoroutineScope()
     val gestures = rememberOverscrollGestures(up = { vm.screen = Screen.DRAWER }, down = { Actions.expandNotifications(ctx) })
 
@@ -117,7 +122,7 @@ fun HubScreen(vm: LauncherVM) {
         val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME && vm.currentHub == "home", vm.skyLat, vm.skyLon)
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
-    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != 0) pager.animateScrollToPage(0) }
+    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != homeAt) pager.animateScrollToPage(homeAt) }
     // Keep an eye on what's playing (for Home's Music line and the recently-played list).
     androidx.compose.runtime.DisposableEffect(Unit) {
         vm.media.onTrack = { t, a, p -> PlayHistory.add(ctx, Played(t, a, p, System.currentTimeMillis())) }
@@ -129,7 +134,7 @@ fun HubScreen(vm: LauncherVM) {
         val i = hubs.indexOfFirst { it.id == vm.currentHub }
         if (i >= 0 && i != pager.currentPage) pager.scrollToPage(i)
     }
-    LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == 0) HOME_PAGE else -1 }
+    LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == homeAt) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
         val id = vm.jumpHub ?: return@LaunchedEffect
         // Clearing the request restarts this effect, which would cancel a scroll still in progress
@@ -365,10 +370,21 @@ object RozmowaHub : Hub {
 @Composable
 fun HubSettings(vm: LauncherVM) {
     val s = vm.store
-    val on = Hubs.enabled(s).map { it.id }
-    Note("Choose your hubs and their order. Home is always first; swipe between hubs or tap the bar at the bottom.")
+    val left = Hubs.leftOf(s)
+    val on = Hubs.enabled(s).map { it.id }.filter { it != left }
+    Box {
+        var pick by remember { mutableStateOf(false) }
+        LinkRow("Left of Home: " + (left?.let { Hubs.byId(it)?.title } ?: "nothing")) { pick = true }
+        androidx.compose.material3.DropdownMenu(pick, onDismissRequest = { pick = false }) {
+            (listOf<Hub?>(null) + Hubs.ALL.filter { it.id != "home" }).forEach { h ->
+                androidx.compose.material3.DropdownMenuItem(text = { Text((if (h?.id == left) "● " else "    ") + (h?.title ?: "Nothing – Home is the first page")) },
+                    onClick = { pick = false; s.leftHub.set(h?.id ?: "") })
+            }
+        }
+    }
+    Note("Swipe right from Home for that page (Groups, as in Dune 1). The rest follow Home in this order; swipe between hubs or tap the bar at the bottom.")
     // Enabled hubs in order, then the rest.
-    (on.mapNotNull { Hubs.byId(it) } + Hubs.ALL.filter { it.id !in on }).forEach { h ->
+    (on.mapNotNull { Hubs.byId(it) } + Hubs.ALL.filter { it.id !in on && it.id != left }).forEach { h ->
         val enabled = h.id in on
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(h.glyph, color = if (enabled) Sand else Faint, fontSize = 18.sp, modifier = Modifier.padding(end = 12.dp))
