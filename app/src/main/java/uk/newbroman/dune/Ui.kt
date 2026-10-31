@@ -165,11 +165,12 @@ fun HomeScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
     // Three pages: swipe right for Groups, left for Widgets; home in the middle.
-    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox.
-    val pager = rememberPagerState(initialPage = HOME_PAGE) { 5 }
+    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox, 5 Map.
+    val pager = rememberPagerState(initialPage = HOME_PAGE) { 6 }
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
     LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
+    LaunchedEffect(vm.jumpTo) { vm.jumpTo?.let { pager.animateScrollToPage(it); vm.jumpTo = null } }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
       HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
@@ -186,6 +187,7 @@ fun HomeScreen(vm: LauncherVM) {
             item { WidgetsBlock(vm) }
         }
         4 -> InboxPage(vm, gestures)
+        5 -> MapPage(vm, active = pager.currentPage == 5 && vm.screen == Screen.HOME)
         else -> LazyColumn(
             Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
             state = listState,
@@ -213,9 +215,9 @@ fun HomeScreen(vm: LauncherVM) {
       }
         // Page marker: groups · home · widgets (tap to jump)
         Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
-            listOf("rozmowa", "groups", "•", "widgets", "inbox").forEachIndexed { i, l ->
+            listOf("rozmowa", "groups", "•", "widgets", "inbox", "map").forEachIndexed { i, l ->
                 Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 12.sp,
-                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 12.dp, vertical = 4.dp))
+                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 8.dp, vertical = 4.dp))
             }
         }
         Row(
@@ -435,34 +437,19 @@ private fun NotificationsBlock(vm: LauncherVM) {
         )
         return
     }
-    if (items.isEmpty()) {
-        Header("Notifications")
-        Text("Nothing new", color = Faint, fontSize = 15.sp)
-        return
-    }
-    val groups = items.groupBy { it.pkg }.entries.toList()
-    Header("Notifications · ${items.size}", "clear all") { NotifService.instance?.cancelAllNotifications() }
-    groups.take(6).forEach { (pkg, list) ->
-        val latest = list.first()
-        Column(
-            Modifier.fillMaxWidth()
-                .combinedClickable(
-                    onLongClick = { list.forEach { NotifService.instance?.cancelNotification(it.key) } },
-                    onClick = { Actions.openNotification(act, latest) },
-                )
-                .padding(vertical = 7.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(vm.labelFor(pkg), color = Fg, fontSize = 17.sp)
-                if (list.size > 1) Text("  ${list.size}", color = Sand, fontSize = 15.sp)
-            }
-            val line = listOf(latest.title, latest.text).filter { it.isNotBlank() }.joinToString(" – ")
-            if (line.isNotBlank()) Text(line, color = Dim, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-    if (groups.size > 6) Text(
-        "+ ${groups.size - 6} more apps", color = Dim, fontSize = 14.sp,
-        modifier = Modifier.combinedClickable { Actions.expandNotifications(act) }.padding(vertical = 4.dp)
+    // Everything now lives in the Inbox page; the home screen just says what's waiting.
+    val people = items.count { it.kind != "other" }
+    val other = items.size - people
+    Header("Inbox", "open") { vm.jumpTo = 4 }
+    Text(
+        when {
+            items.isEmpty() -> "Nothing new"
+            people == 0 -> "$other other notification" + (if (other == 1) "" else "s")
+            else -> "$people message" + (if (people == 1) "" else "s") + (if (other > 0) "  ·  $other other" else "") +
+                "  ·  " + items.filter { it.kind != "other" }.map { it.title.ifBlank { vm.labelFor(it.pkg) } }.distinct().take(3).joinToString(", ")
+        },
+        color = if (people > 0) Fg else Faint, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().combinedClickable { vm.jumpTo = 4 }.padding(vertical = 6.dp)
     )
 }
 
@@ -815,7 +802,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Widgets", s.showWidgets) }
         item { Toggle("Coinbase holdings", s.showCoinbase) }
         item { Toggle("Weather", s.showWeather) }
-        item { Toggle("Notifications", s.showNotifs) }
+        item { Toggle("Inbox summary", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
         item { Toggle("Sky background", s.showSky) }
         item { Toggle("Weather on the sky", s.skyWeather) }

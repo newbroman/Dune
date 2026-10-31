@@ -7,7 +7,8 @@ one-tap remote commands).
 
 ## Gestures
 - **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice (*full screen* opens it on its own, like an app; so does tapping it in My apps or Languages).
-  **Swipe left** – your widgets; **twice** – the Inbox. Home or Back returns to the middle.
+  **Swipe left** – your widgets; **twice** – the Inbox; **three times** – a map with you on it (share your location, open in Maps).
+  Home or Back returns to the middle.
 - **Swipe up** (or tap *apps*) – the command bar: type to find apps, people (call / text / WhatsApp), tasks, messages and your web apps, run a command ("add task…", "navigate to…"), or ask the AI. Enter launches the top app; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
 - **Favourites** sit on the home screen as a grid of icons; long-press one to move it left or right or remove it. Web pages can be favourites too: long-press one in My apps › Add to favourites.

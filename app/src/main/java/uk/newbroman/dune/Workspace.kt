@@ -55,13 +55,14 @@ private fun ago(t: Long): String {
 fun InboxPage(vm: LauncherVM, gestures: NestedScrollConnection) {
     val act = LocalContext.current as MainActivity
     val items by NotifService.items.collectAsState()
-    var filter by rememberSaveable { mutableStateOf("all") }
+    // Default: only what people sent you (messages and email); the rest is one tap away.
+    var filter by rememberSaveable { mutableStateOf("people") }
     var replying by remember { mutableStateOf<String?>(null) }
-    val shown = items.filter { filter == "all" || it.kind == filter }
+    val shown = items.filter { when (filter) { "all" -> true; "people" -> it.kind != "other"; else -> it.kind == filter } }
     SidePage("Inbox", gestures) {
         item {
             FlowRow {
-                listOf("all" to "All ${items.size}", "message" to "Messages", "email" to "Email", "other" to "Other").forEach { (k, l) ->
+                listOf("people" to "Messages & email ${items.count { it.kind != "other" }}", "other" to "Other ${items.count { it.kind == "other" }}", "all" to "All").forEach { (k, l) ->
                     Text(l, color = if (filter == k) Sand else Dim, fontSize = 14.sp,
                         modifier = Modifier.combinedClickable { filter = k }.padding(end = 16.dp, bottom = 8.dp))
                 }
