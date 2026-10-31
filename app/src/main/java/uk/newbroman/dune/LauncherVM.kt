@@ -149,6 +149,19 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** A request Dune couldn't handle itself: offer Claude / Gemini / Google. */
     var assistantFallback by mutableStateOf<String?>(null)
     var pendingReply by mutableStateOf<PendingReply?>(null)
+
+    /** Dune's AI (Brain): one question at a time; the answer goes to [onAnswer]. */
+    var aiBusy by mutableStateOf(false)
+    fun askAi(question: String, speak: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
+        if (aiBusy) return
+        aiBusy = true; onAnswer("Thinking…")
+        viewModelScope.launch {
+            val a = try { Brain.ask(ctx, store, question, spoken = speak) } catch (e: Exception) { "AI: " + (e.message ?: "something went wrong") }
+            aiBusy = false; onAnswer(a)
+            if (speak) Speaker.speak(ctx, a)
+        }
+    }
+    var inboxAnswer by mutableStateOf<String?>(null)
     /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */
     var widgetTarget by mutableStateOf<String?>(null)
 

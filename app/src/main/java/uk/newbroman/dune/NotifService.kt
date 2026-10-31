@@ -22,6 +22,8 @@ data class NotifItem(
     val isMessage: Boolean = false,
     /** The app's own "Reply" action, if it offers one. */
     val reply: Notification.Action? = null,
+    /** "message", "email" or "other" – for the inbox filters. */
+    val kind: String = "other",
 )
 
 /** Mirrors the phone's dismissable notifications so the home screen can list them. */
@@ -53,6 +55,10 @@ class NotifService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         refresh()
         val n = items.value.firstOrNull { it.key == sbn?.key } ?: return
+        if (n.kind != "other") runCatching {
+            val app = packageManager.getApplicationLabel(packageManager.getApplicationInfo(n.pkg, 0)).toString()
+            InboxLog.add(this, InboxLog.Entry(n.time, n.pkg, app, n.title, n.text, n.kind))
+        }
         if (n.isMessage && Drive.active.value && Store.get(this).driveReadAloud.value) {
             val id = n.key + "|" + n.text
             if (spoken.add(id)) {
@@ -83,12 +89,13 @@ class NotifService : NotificationListenerService() {
                     pkg = s.packageName,
                     title = (ex.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)
                         ?: ex.getCharSequence(Notification.EXTRA_TITLE))?.toString().orEmpty(),
-                    text = lastMsg ?: ex.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty(),
+                    text = lastMsg ?: (ex.getCharSequence(Notification.EXTRA_BIG_TEXT) ?: ex.getCharSequence(Notification.EXTRA_TEXT))?.toString().orEmpty(),
                     time = s.postTime,
                     intent = nt.contentIntent,
                     autoCancel = nt.flags and Notification.FLAG_AUTO_CANCEL != 0,
                     isMessage = nt.category == Notification.CATEGORY_MESSAGE || msgs != null || reply != null,
                     reply = reply,
+                    kind = Kind.of(s.packageName, nt.category, nt.category == Notification.CATEGORY_MESSAGE || msgs != null || reply != null),
                 )
             }
     }

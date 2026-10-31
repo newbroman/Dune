@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+: the same for cloud backup and phone-to-phone transfer. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="inbox-log.json" />
+        <exclude domain="file" path="vosk-en" />
+        <exclude domain="sharedpref" path="dune-secure.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="inbox-log.json" />
+        <exclude domain="sharedpref" path="dune-secure.xml" />
+    </device-transfer>
+</data-extraction-rules>

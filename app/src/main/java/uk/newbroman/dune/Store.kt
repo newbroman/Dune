@@ -102,6 +102,10 @@ class Store private constructor(ctx: Context) {
     }
     val hideBalances = Flag("hideBalances", false)
 
+    // Workspaces: two apps side by side, one per line "Name | first app | second app"
+    val showWorkspaces = Flag("showWorkspaces", true)
+    val workspaces = Str("workspaces", "Maps + music | Maps | Spotify\nTranslate + chat | Translate | WhatsApp")
+
     // Drive mode
     val driveAuto = Flag("driveAuto", true)
     val driveReadAloud = Flag("driveReadAloud", true)

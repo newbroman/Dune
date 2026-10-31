@@ -63,6 +63,8 @@ class MainActivity : ComponentActivity() {
     fun handleAsk(text: String, speak: Boolean = vm.screen == Screen.DRIVE) {
         vm.assistantFallback = null
         val cmd = Assistant.interpret(text)
+        // Anything Dune can't do itself goes to the AI, if one is set up.
+        if (cmd is Cmd.Unknown && Brain.ready(this)) { vm.askAi(text, speak); return }
         val reply = Assistant.run(this, vm, cmd)
         vm.assistantReply = reply ?: if (vm.assistantFallback != null) "“${vm.assistantFallback}”" else null
         if (speak) {

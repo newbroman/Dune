@@ -165,8 +165,8 @@ fun HomeScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
     // Three pages: swipe right for Groups, left for Widgets; home in the middle.
-    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets.
-    val pager = rememberPagerState(initialPage = HOME_PAGE) { 4 }
+    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox.
+    val pager = rememberPagerState(initialPage = HOME_PAGE) { 5 }
     val scope = rememberCoroutineScope()
     LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
     LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
@@ -185,6 +185,7 @@ fun HomeScreen(vm: LauncherVM) {
         3 -> SidePage("Widgets", gestures) {
             item { WidgetsBlock(vm) }
         }
+        4 -> InboxPage(vm, gestures)
         else -> LazyColumn(
             Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
             state = listState,
@@ -203,6 +204,7 @@ fun HomeScreen(vm: LauncherVM) {
             if (s.showNotifs.value) item { NotificationsBlock(vm) }
             if (s.showTasks.value) item { TasksBlock(s) }
             if (s.showFavs.value) item { FavouritesBlock(vm) }
+            if (s.showWorkspaces.value) item { WorkspacesBlock(vm) }
             if (s.showTermux.value) item { TermuxBlock(vm) }
             if (s.showL14.value) item { L14Block(vm) }
             item { Spacer(Modifier.height(32.dp)) }
@@ -211,7 +213,7 @@ fun HomeScreen(vm: LauncherVM) {
       }
         // Page marker: groups · home · widgets (tap to jump)
         Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
-            listOf("rozmowa", "groups", "•", "widgets").forEachIndexed { i, l ->
+            listOf("rozmowa", "groups", "•", "widgets", "inbox").forEachIndexed { i, l ->
                 Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 12.sp,
                     modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 12.dp, vertical = 4.dp))
             }
@@ -246,7 +248,7 @@ fun HomeScreen(vm: LauncherVM) {
 }
 
 @Composable
-private fun Header(text: String, trailing: String? = null, onTrailing: (() -> Unit)? = null) {
+internal fun Header(text: String, trailing: String? = null, onTrailing: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text.uppercase(), color = Dim, fontSize = 12.sp, letterSpacing = 2.sp)
         Spacer(Modifier.weight(1f))
@@ -258,7 +260,7 @@ private fun Header(text: String, trailing: String? = null, onTrailing: (() -> Un
 }
 
 @Composable
-private fun Chip(label: String, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
+internal fun Chip(label: String, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(18.dp), color = Color.Transparent, border = BorderStroke(1.dp, Faint),
         modifier = Modifier.padding(end = 8.dp, bottom = 8.dp)
@@ -357,7 +359,7 @@ private fun AssistantBlock(vm: LauncherVM) {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
             .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null })
     }
-    vm.assistantFallback?.let { f ->
+    if (!Brain.ready(act)) vm.assistantFallback?.let { f ->
         FlowRow(Modifier.padding(top = 6.dp)) {
             Chip("Ask Claude") { Assistant.askClaude(act, f); vm.assistantFallback = null }
             Chip("Ask Gemini") { Assistant.askGemini(act, f); vm.assistantFallback = null }
@@ -702,6 +704,8 @@ fun DrawerScreen(vm: LauncherVM) {
     }
     DisposableEffect(Unit) { onDispose { keyboard?.hide() } }
     val gestures = rememberOverscrollGestures(up = {}, down = { vm.goHome() })
+    val found = rememberLookups(query)
+    val aiReady = remember { Brain.ready(ctx) }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 24.dp)) {
         BasicTextField(
@@ -713,11 +717,12 @@ fun DrawerScreen(vm: LauncherVM) {
             }),
             modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 12.dp).focusRequester(focus),
             decorationBox = { inner ->
-                Box { if (query.isEmpty()) Text("Search apps", color = Faint, fontSize = 22.sp); inner() }
+                Box { if (query.isEmpty()) Text("Search or ask…", color = Faint, fontSize = 22.sp); inner() }
             },
         )
         LazyColumn(Modifier.weight(1f).fillMaxWidth().nestedScroll(gestures)) {
             items(visible, key = { it.key }) { a -> AppRow(vm, a) }
+            commandResults(vm, ctx as MainActivity, query, found, aiReady) { query = "" }
             if (q.isNotEmpty()) item {
                 Text(
                     "Search the web for “${query.trim()}”", color = Dim, fontSize = 17.sp,
@@ -821,6 +826,17 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("L14", s.showL14) }
         item { Toggle("Open keyboard with app list", s.autoKeyboard) }
 
+        item { Header("Dune AI") }
+        item { AiSettings(vm) }
+
+        item { Header("Workspaces (two apps side by side)") }
+        item {
+            Note("One per line:  Name | first app | second app. Names can be the start of an app's name. " +
+                "Tap a workspace on the home screen to open both in split screen.")
+            Field("Workspaces", s.workspaces, multi = true)
+        }
+        item { Toggle("Show workspaces on the home screen", s.showWorkspaces) }
+
         item { Header("Coinbase") }
         item { CoinbaseSettings(vm) }
 
@@ -895,13 +911,13 @@ fun SettingsScreen(vm: LauncherVM) {
 }
 
 @Composable
-private fun LinkRow(label: String, onClick: () -> Unit) = Text(
+internal fun LinkRow(label: String, onClick: () -> Unit) = Text(
     "$label  →", color = Fg, fontSize = 17.sp,
     modifier = Modifier.fillMaxWidth().combinedClickable(onClick = onClick).padding(vertical = 10.dp)
 )
 
 @Composable
-private fun Note(text: String) = Text(text, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+internal fun Note(text: String) = Text(text, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
 
 /** "OK Computer": setting up the offline wake word for Drive mode. */
 @Composable
@@ -1285,7 +1301,7 @@ private fun GridWeb(vm: LauncherVM, w: WebApp) {
 
 /** A side page of the home screen: a heading and a scrolling list, over the sky. */
 @Composable
-private fun SidePage(title: String, gestures: NestedScrollConnection, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+internal fun SidePage(title: String, gestures: NestedScrollConnection, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
     LazyColumn(Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp)) {
         item { Text(title, color = Fg, fontSize = 30.sp, fontWeight = FontWeight.Light, modifier = Modifier.padding(top = 36.dp, bottom = 12.dp)) }
         content()

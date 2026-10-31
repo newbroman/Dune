@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 6–11: keep message history and keys out of Google backups. -->
+<full-backup-content>
+    <exclude domain="file" path="inbox-log.json" />
+    <exclude domain="file" path="vosk-en" />
+    <exclude domain="sharedpref" path="dune-secure.xml" />
+</full-backup-content>

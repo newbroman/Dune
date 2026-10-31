@@ -7,8 +7,8 @@ one-tap remote commands).
 
 ## Gestures
 - **Swipe right** – your app groups, as a list of categories (tap one to see its apps); **twice** – Rozmowa, the Polish conversation app, with mic and voice (*full screen* opens it on its own, like an app; so does tapping it in My apps or Languages).
-  **Swipe left** – your widgets. Home or Back returns to the middle.
-- **Swipe up** (or tap *apps*) – app list with search. Enter launches the top match; no match offers a web search.
+  **Swipe left** – your widgets; **twice** – the Inbox. Home or Back returns to the middle.
+- **Swipe up** (or tap *apps*) – the command bar: type to find apps, people (call / text / WhatsApp), tasks, messages and your web apps, run a command ("add task…", "navigate to…"), or ask the AI. Enter launches the top app; no match offers a web search.
 - **Swipe down** on home – pulls down the notification shade. Swipe down at the top of the app list – back home.
 - **Favourites** sit on the home screen as a grid of icons; long-press one to move it left or right or remove it. Web pages can be favourites too: long-press one in My apps › Add to favourites.
 - **Long-press** an app – favourite / hide / move or copy to another group / app info / uninstall. Long-press a favourite – reorder or remove.
@@ -25,6 +25,17 @@ one-tap remote commands).
 - **Coinbase** – your holdings and total in pounds, from a *view-only* Coinbase API key (ECDSA) stored encrypted
   on the phone. Tap to open Coinbase, long-press to refresh, *hide* to mask the figures.
 - **Widgets** – "+ add a widget" puts any app's widget (Google Translate, Weawow, Maps…) on the home screen.
+
+## Workspace
+- **Inbox** (two swipes left) – messages, email and other notifications in one stream, newest first. Filter by
+  Messages / Email / Other, reply in place (typed or 🎤) where the app allows it, ✕ to dismiss, and *✦ Catch me up*
+  for an AI summary. Messages and emails are also kept in a 7-day log on the phone so they can still be found after
+  you clear them (Settings › Dune AI › Forget the saved message history).
+- **Dune AI** – anything Ask Dune can't do itself goes to an AI using your own OpenAI or OpenRouter key (stored
+  encrypted): "when is Tom coming?", "what's on this week?". It can read your messages, tasks and calendar – each
+  can be switched off – and nothing is sent until you ask.
+- **Workspaces** – saved pairs of apps opened side by side in split screen, e.g. *Maps | Spotify*
+  (Settings › Workspaces).
 
 ## Drive mode
 Opens when the phone connects to your car's Bluetooth (Settings › Drive mode › choose your car), or tap *drive*.
