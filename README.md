@@ -1,5 +1,12 @@
 # Dune — a minimal text launcher for Android
 
+> **Dune 2** (in `dune2/`, installs alongside as *Dune 2*) rebuilds Dune from **hubs**: one page per area of life, each with
+> Dune's own live view, a one-line summary on Home, and a hand-off row to the apps that do the job in full (*↗ last app* and
+> *apps ▾*). You choose your hubs and their order in Settings › Hubs. 2.0 has **Home**, **Comms** (people-first: everyone who
+> has messaged or emailed you this week, across apps, with reply / call / text / WhatsApp), **Tasks** (tasks and notes,
+> by voice too), and Dune's Map, Weather, Groups, Widgets and Rozmowa pages as hubs. Coming: Music, Record (camera, audio,
+> gallery), Agenda, Jobs, Wallet, Learn, Machines. Releases carry both `Dune.apk` and `Dune2.apk`.
+
 Black, text-only home screen with: clock and date, weather (Open-Meteo, no API key),
 notifications grouped by app, a task list, favourite apps, Termux shortcuts, and an L14 panel
 (online status, warnings about its backups, services, disk and NRG jobs, SSH, Termius, Wake-on-LAN,

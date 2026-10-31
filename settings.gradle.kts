@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "DuneLauncher"
 include(":app")
+include(":dune2")   // Dune 2: the modular, hub-based launcher
