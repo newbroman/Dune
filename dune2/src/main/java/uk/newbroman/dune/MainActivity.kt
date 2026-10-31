@@ -14,6 +14,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private val vm: LauncherVM by viewModels()
@@ -82,8 +84,46 @@ class MainActivity : ComponentActivity() {
     private var clozeWeb: SpeechWebView? = null
     /** Cloze (the sentence trainer), kept alive like Rozmowa so a round survives swipes. */
     fun cloze(): SpeechWebView = clozeWeb ?: SpeechWebView(this, SpeechWebView.CLOZE).also { clozeWeb = it }
+    private var wellsWeb: SpeechWebView? = null
+    /** The Newborough well logger, run inside Dune (its readings are kept in Dune's own web storage). */
+    fun wells(): SpeechWebView = wellsWeb ?: SpeechWebView(this, SpeechWebView.WELLS).also { wellsWeb = it }
 
-    override fun onDestroy() { runCatching { unregisterReceiver(wakeReceiver) }; rozmowaWeb?.destroy(); rozmowaWeb = null; clozeWeb?.destroy(); clozeWeb = null; super.onDestroy() }
+    private var pickCallback: ((List<android.net.Uri>) -> Unit)? = null
+    private val pickLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        val cb = pickCallback; pickCallback = null; cb?.invoke(uris)
+    }
+    private val pickOneLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val cb = pickCallback; pickCallback = null; cb?.invoke(listOfNotNull(uri))
+    }
+    /** Android's file picker (any type); the callback gets an empty list if nothing was chosen. */
+    fun pickFiles(multiple: Boolean = true, cb: (List<android.net.Uri>) -> Unit) {
+        pickCallback?.invoke(emptyList())
+        pickCallback = cb
+        runCatching { if (multiple) pickLauncher.launch(arrayOf("*/*")) else pickOneLauncher.launch(arrayOf("*/*")) }
+            .onFailure { pickCallback = null; cb(emptyList()); toast("No file picker on this phone") }
+    }
+
+    /** Saves a file a web page made into Downloads/Dune, then offers to share it. */
+    fun saveDownload(name: String, mime: String, b64: String) {
+        lifecycleScope.launch {
+            val bytes = runCatching { android.util.Base64.decode(b64, android.util.Base64.DEFAULT) }.getOrNull()
+            val u = bytes?.let { Gis.saveExport(this@MainActivity, name, mime, it) }
+            if (u == null) toast("Couldn't save $name")
+            else { toast("Saved to Downloads/Dune: $name"); Gis.share(this@MainActivity, u, mime, "Share $name") }
+        }
+    }
+
+    /** A map file opened with Dune from another app (Files, Drive, email): add it to the map's layers. */
+    private fun openedFile(intent: Intent?): Boolean {
+        if (intent?.action != Intent.ACTION_VIEW && intent?.action != Intent.ACTION_SEND) return false
+        @Suppress("DEPRECATION")
+        val u = intent.data ?: intent.getParcelableExtra<android.net.Uri>(Intent.EXTRA_STREAM) ?: return false
+        vm.gisImport = listOf(u); vm.jumpHub = "map"
+        intent.action = Intent.ACTION_MAIN; intent.data = null
+        return true
+    }
+
+    override fun onDestroy() { runCatching { unregisterReceiver(wakeReceiver) }; rozmowaWeb?.destroy(); rozmowaWeb = null; clozeWeb?.destroy(); clozeWeb = null; wellsWeb?.destroy(); wellsWeb = null; super.onDestroy() }
 
     // ---------- widgets
 
@@ -239,6 +279,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null && intent != null && !voiceIntent(intent) && intent.getBooleanExtra("drive", false)) {
             intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE
         }
+        if (savedInstanceState == null) openedFile(intent)
         onBackPressedDispatcher.addCallback(this) { vm.back() }
         setContent { DuneApp(vm) }
     }
@@ -247,6 +288,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (voiceIntent(intent)) return
+        if (openedFile(intent)) { vm.goHome(); vm.jumpHub = "map"; return }
         if (intent.getBooleanExtra("drive", false)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
         else { vm.goHome(); intent.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it } }
     }

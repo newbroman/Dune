@@ -2,4 +2,5 @@
 <paths>
     <files-path name="tracks" path="tracks/" />
     <files-path name="recordings" path="recordings/" />
+    <files-path name="gis" path="gis/" />
 </paths>

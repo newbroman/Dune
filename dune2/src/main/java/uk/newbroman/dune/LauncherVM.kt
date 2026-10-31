@@ -35,7 +35,7 @@ data class AppEntry(
 const val PORTFOLIO = "https://newbroman.github.io/"
 val PORTFOLIO_APP = WebApp("My GitHub apps", PORTFOLIO, "")
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE, WELLS }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
@@ -173,6 +173,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var cameraVideo by mutableStateOf(false)
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
+    /** Map files to add as layers (opened with Dune from another app). */
+    var gisImport by mutableStateOf<List<android.net.Uri>?>(null)
     /** Ask the map page to switch to a map (by id), e.g. the rain radar from the weather page. */
     var mapRequest by mutableStateOf<String?>(null)
     /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */
@@ -520,7 +522,11 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var homePage by mutableIntStateOf(HOME_PAGE)
 
     /** Back button: never leaves the launcher; from a side page it returns to the middle. */
-    fun back() { if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) homeTick++ }
+    fun back() {
+        val from = screen
+        if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) homeTick++
+        if (from == Screen.WELLS) jumpHub = "map"   // the well logger was opened from the map
+    }
 
     fun onResume() {
         resumeTick++

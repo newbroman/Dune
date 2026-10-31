@@ -28,6 +28,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -133,8 +134,22 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     var placeShown by remember { mutableStateOf<Found?>(null) }
     var routeShown by remember { mutableStateOf<List<Pair<Double, Double>>?>(null) }
     val ready = remember { booleanArrayOf(false) }   // Dune's own map loaded and ready for drawing
+    // GIS: layers, their load status, the survey, and the OS grid reference of where you are.
+    var layers by remember { mutableStateOf(Gis.load(act)) }
+    val layerStatus = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+    var surveyCount by remember { mutableIntStateOf(0) }
+    var grid by remember { mutableStateOf<String?>(null) }
+    var gridOn by remember { mutableStateOf(prefs.getBoolean("mapGrid", true)) }
+    var measuring by remember { mutableStateOf(false) }
+    var showLayers by remember { mutableStateOf(false) }
+    var surveyOpen by remember { mutableStateOf(false) }
+    val exportToQField = remember { booleanArrayOf(false) }
+    val gisScope = androidx.compose.runtime.rememberCoroutineScope()
+    // The bridge below is only answered while Dune's own map is showing, not Mapy.com or Windy.
+    val ownPage = remember { BooleanArray(1) }
     val web = remember {
-        val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
+        val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act))
+            .addPathHandler("/gis/", WebViewAssetLoader.InternalStoragePathHandler(act, Gis.dir(act))).build()
         WebView(act).apply {
             // Fill the page. Without this the WebView sizes itself to its content, and a full-height
             // map has no content height – it collapses to nothing (the "black box").
@@ -146,7 +161,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             setBackgroundColor(android.graphics.Color.BLACK)
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? = loader.shouldInterceptRequest(r.url)
-                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) { ready[0] = false }
+                override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) { ready[0] = false; ownPage[0] = url?.startsWith(LEAFLET) == true }
                 override fun onPageFinished(v: WebView, url: String?) {
                     ready[0] = url?.startsWith(LEAFLET) == true
                     if (url?.startsWith(LEAFLET) == true) {
@@ -155,6 +170,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                         showingPts?.let { v.evaluateJavascript("showTrack(${trackJs(it)})", null) }   // a saved track asked for before the map loaded
                         placeShown?.let { f -> v.evaluateJavascript("showPlace(${f.lat},${f.lon},${org.json.JSONObject.quote(f.name)})", null) }
                         routeShown?.let { r -> v.evaluateJavascript("showRoute(${routeJs(r)})", null) }
+                        v.evaluateJavascript("gisSetLayers(${Gis.toJs(layers)})", null)
+                        val sv = Gis.surveyFile(act).takeIf { it.exists() }?.readText()
+                        if (sv != null) v.evaluateJavascript("gisSetSurvey($sv)", null)
                     }
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
@@ -170,6 +188,27 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             }
             addJavascriptInterface(object {
                 @JavascriptInterface fun following(on: Boolean) { post { following = on } }
+                @JavascriptInterface fun grid(g: String) { if (!ownPage[0]) return; post { grid = g.ifEmpty { null } } }
+                @JavascriptInterface fun layerStatus(id: String, s: String) { if (!ownPage[0]) return; post { layerStatus[id] = s } }
+                @JavascriptInterface fun surveyCount(n: Int) { if (!ownPage[0]) return; post { surveyCount = n } }
+                @JavascriptInterface fun measuring(on: Boolean) { if (!ownPage[0]) return; post { measuring = on } }
+                @JavascriptInterface fun toast(s: String) { if (!ownPage[0]) return; post { act.toast(s) } }
+                @JavascriptInterface fun gisReady() {}
+                @JavascriptInterface fun copy(s: String) { if (!ownPage[0]) return; post {
+                    act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Grid reference", s))
+                    act.toast("Copied") } }
+                @JavascriptInterface fun surveySaved(json: String) { if (!ownPage[0]) return; runCatching { Gis.surveyFile(act).writeText(json) } }
+                @JavascriptInterface fun openLogger(well: String) { if (!ownPage[0]) return; post { openWellLogger(vm, act, well) } }
+                @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) { if (!ownPage[0]) return; post {
+                    gisScope.launch {
+                        val u = Gis.saveExport(act, name, mime, android.util.Base64.decode(b64, android.util.Base64.DEFAULT))
+                        when {
+                            u == null -> act.toast("Couldn't save $name")
+                            exportToQField[0] -> { exportToQField[0] = false; Gis.sendToQField(act, u, mime) }
+                            else -> { act.toast("Saved to Downloads/Dune: $name"); Gis.share(act, u, mime, "Share the survey") }
+                        }
+                    }
+                } }
             }, "Dune")
             // Let the map have its drags; otherwise the pager would take every sideways swipe.
             setOnTouchListener { v, e ->
@@ -184,6 +223,26 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         if (s.site != null) { web.loadUrl(s.site.invoke(here)); siteCentred = here != null }
         else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}'); setRadar(${s.radar})", null)
         else web.loadUrl(leafletUrl(s))
+    }
+    fun dune(js: String) {
+        if (source.site != null) { show(MAP_SOURCES.first { it.id == "dark" }); web.postDelayed({ web.evaluateJavascript(js, null) }, 1500) }
+        else web.evaluateJavascript(js, null)
+    }
+    fun setLayers(l: List<Gis.Layer>) {
+        layers = l; Gis.save(act, l)
+        if (ready[0]) web.evaluateJavascript("gisSetLayers(${Gis.toJs(l)})", null)
+        else if (source.site != null && l.any { it.on }) show(MAP_SOURCES.first { it.id == "dark" })   // drawn once Dune's map loads
+    }
+    fun importFiles(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        gisScope.launch {
+            val (added, bad) = Gis.import(act, uris, layers)
+            if (bad.isNotEmpty()) act.toast("Not a map file Dune can read: " + bad.joinToString(", "))
+            if (added.isEmpty()) return@launch
+            setLayers(layers + added.mapIndexed { i, a -> if (i == 0) a else a })
+            act.toast("Added " + added.joinToString(", ") { it.name })
+            web.postDelayed({ if (ready[0]) web.evaluateJavascript("gisZoom('${added.first().id}')", null) }, 1200)
+        }
     }
     // The track being recorded: draw new points as they arrive.
     val recording by Tracks.recording.collectAsState()
@@ -208,6 +267,11 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn when the map finishes loading
         else if (ready[0]) web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
         }
+    }
+    LaunchedEffect(vm.gisImport) {
+        val u = vm.gisImport ?: return@LaunchedEffect
+        vm.gisImport = null
+        importFiles(u)
     }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
@@ -324,13 +388,24 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 showing != null -> "${showing!!.name.removePrefix("Track ")} · " + String.format(Locale.UK, "%.2f km · %d min", showing!!.km, showing!!.minutes)
                 !any -> "Allow location to see where you are"
                 here == null -> if (active) "Finding you…" else " "
-                else -> listOfNotNull(place, latLon(here!!), "±${here!!.accuracy.toInt()} m").joinToString("  ·  ")
+                else -> listOfNotNull(place, if (gridOn && grid != null) grid else latLon(here!!), "±${here!!.accuracy.toInt()} m").joinToString("  ·  ")
             },
             color = Dim, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
         }
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            MapAction("layers" + layers.count { it.on }.let { if (it > 0) " ($it)" else "" } + " ▾") { showLayers = true }
+            Box {
+                MapAction(if (measuring) "■ measuring" else "survey" + (if (surveyCount > 0) " ($surveyCount)" else "") + " ▾") {
+                    if (measuring) web.evaluateJavascript("gisEndMeasure()", null) else surveyOpen = true
+                }
+                SurveyMenu(surveyOpen, surveyCount, gridOn, onDismiss = { surveyOpen = false }, js = { dune(it) },
+                    onGrid = { gridOn = !gridOn; prefs.edit().putBoolean("mapGrid", gridOn).apply() },
+                    onExport = { fmt, qf -> exportToQField[0] = qf; web.evaluateJavascript("gisExport('$fmt')", null) })
+            }
+            Text("wells", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable(
+                onClick = { openWellLogger(vm, act) }, onLongClick = { openWellLogger(vm, act, installed = true) }).padding(horizontal = 8.dp, vertical = 10.dp))
             if (here != null) {
                 if (source.site != null) MapAction("centre") { web.loadUrl(source.site!!.invoke(here)) }
                 else if (!following) MapAction("centre") { web.evaluateJavascript("centre()", null); following = true }
@@ -356,6 +431,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
             }
         }
+        if (showLayers) LayersSheet(layers, layerStatus, onChange = { setLayers(it) },
+            onZoom = { l -> showLayers = false; web.postDelayed({ if (ready[0]) web.evaluateJavascript("gisZoom('${l.id}')", null) }, if (ready[0]) 300 else 2500) },
+            onAddFiles = { act.pickFiles { importFiles(it) } }, onClose = { showLayers = false })
         Box(Modifier.fillMaxWidth().weight(1f)) {
             AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
             // A strip down the left edge still swipes back to the inbox.
@@ -377,7 +455,7 @@ internal fun MapAction(label: String, onClick: () -> Unit) = Text(label, color =
     modifier = Modifier.combinedClickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp))
 
 private fun push(web: WebView, l: Location) =
-    web.evaluateJavascript("window.setPos && setPos(${l.latitude}, ${l.longitude}, ${maxOf(5f, l.accuracy)})", null)
+    web.evaluateJavascript("window.setPos && setPos(${l.latitude}, ${l.longitude}, ${maxOf(5f, l.accuracy)}, ${if (l.hasAltitude()) l.altitude else "null"})", null)
 
 /** Weather widgets (Weawow or any) on the weather hub, under Dune's own forecast. */
 fun androidx.compose.foundation.lazy.LazyListScope.weatherWidgets(vm: LauncherVM, act: MainActivity) {
@@ -410,7 +488,7 @@ fun androidx.compose.foundation.lazy.LazyListScope.weatherWidgets(vm: LauncherVM
 data class MapApp(val pkg: String, val label: String, val geo: Boolean, val icon: androidx.compose.ui.graphics.ImageBitmap?)
 
 private val MAP_WORDS = listOf("map", "mapy", "waze", "earth", "komoot", "outdoor", "hiking", "hike", "trail", "osm",
-    "turyst", "navig", "gps", "ordnance", "os maps", "citymapper", "here we")
+    "turyst", "navig", "gps", "ordnance", "os maps", "citymapper", "here we", "qfield", "qgis", "field")
 
 /** Every app that can show a place (geo: links), plus installed apps that look like maps by name. */
 fun mapApps(ctx: Context, vm: LauncherVM): List<MapApp> {

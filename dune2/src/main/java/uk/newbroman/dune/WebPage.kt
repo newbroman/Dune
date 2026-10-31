@@ -40,11 +40,28 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.mediaPlaybackRequiresUserGesture = false
+        settings.setGeolocationEnabled(true)
         setBackgroundColor(android.graphics.Color.TRANSPARENT)
         addJavascriptInterface(Bridge(), "DuneBridge")
         val origin = Uri.parse(home).let { "${it.scheme}://${it.host}" }
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT))
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             WebViewCompat.addDocumentStartJavaScript(this, SHIM, setOf(origin))
+            WebViewCompat.addDocumentStartJavaScript(this, DOWNLOADS, setOf(origin))
+        }
+        // Location for the page (the well logger's GPS), file picking, and the app's own downloads.
+        webChromeClient = object : android.webkit.WebChromeClient() {
+            override fun onGeolocationPermissionsShowPrompt(o: String, cb: android.webkit.GeolocationPermissions.Callback) {
+                val has = act.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                    act.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (has) cb.invoke(o, true, false)
+                else act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { r -> cb.invoke(o, r.values.any { it }, false) }
+            }
+            override fun onShowFileChooser(v: WebView, cb: android.webkit.ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean {
+                act.pickFiles(p.mode == FileChooserParams.MODE_OPEN_MULTIPLE) { uris -> cb.onReceiveValue(if (uris.isEmpty()) null else uris.toTypedArray()) }
+                return true
+            }
+        }
+        setDownloadListener { url, _, _, _, _ -> if (url.startsWith("http")) act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(v: WebView, req: WebResourceRequest): Boolean {
                 // Stay on the app's own site; anything else (e.g. the Gemini key page) opens in the browser.
@@ -52,8 +69,13 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
                 act.tryStart(Intent(Intent.ACTION_VIEW, req.url)); return true
             }
             override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                loaded = false
                 // Older WebViews: inject as early as we can.
-                if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) v.evaluateJavascript(SHIM, null)
+                if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { v.evaluateJavascript(SHIM, null); v.evaluateJavascript(DOWNLOADS, null) }
+            }
+            override fun onPageFinished(v: WebView, url: String?) {
+                loaded = true
+                whenLoaded.forEach { v.evaluateJavascript(it, null) }; whenLoaded.clear()
             }
         }
         loadUrl(home)
@@ -68,6 +90,11 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
             }
         }
     }
+
+    private var loaded = false
+    private val whenLoaded = ArrayList<String>()
+    /** Runs some of the page's own JavaScript, waiting for the page to finish loading if need be. */
+    fun runWhenLoaded(code: String) { main.post { if (loaded) view.evaluateJavascript(code, null) else whenLoaded += code } }
 
     private var lastReload = 0L
     private val heightCheck = Runnable { checkHeight(nudged = false) }
@@ -107,6 +134,8 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
         @JavascriptInterface fun recStop(id: Int) = main.post { recognizer?.stopListening() }
         @JavascriptInterface fun speak(id: Int, text: String, lang: String, rate: Float, pitch: Float) = main.post { say(id, text, lang, rate, pitch) }
         @JavascriptInterface fun ttsStop() = main.post { tts?.stop() }
+        /** A file the page "downloaded" (e.g. the well logger's CSV): saved to Downloads/Dune, then offered to share. */
+        @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) = main.post { act.saveDownload(name, mime, b64) }
     }
 
     private fun startRec(id: Int, lang: String, interim: Boolean) {
@@ -190,6 +219,26 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
     companion object {
         const val ROZMOWA = "https://newbroman.github.io/rozmowa/"
         const val CLOZE = "https://newbroman.github.io/cloze/"
+        const val WELLS = "https://newbroman.github.io/Newborough_welllogger/"
+
+        /** WebView can't save a page's own downloads (blob: links), so they're handed to Dune instead. */
+        val DOWNLOADS = """
+(function(){
+ if (window.__duneDl || !window.DuneBridge) return; window.__duneDl = 1;
+ var blobs = new Map(), cou = URL.createObjectURL;
+ URL.createObjectURL = function(o){ var u = cou.call(URL, o); if (o instanceof Blob) blobs.set(u, o); return u; };
+ function send(b, name){ var r = new FileReader(); r.onload = function(){ DuneBridge.saveFile(name || 'download', b.type || 'application/octet-stream', String(r.result).split(',')[1] || ''); }; r.readAsDataURL(b); }
+ function grab(a){
+  if (!a.hasAttribute('download') || !/^(blob|data):/.test(a.href)) return false;
+  var b = blobs.get(a.href); if (b) { send(b, a.getAttribute('download')); return true; }
+  if (a.href.indexOf('data:') === 0) { fetch(a.href).then(function(r){ return r.blob(); }).then(function(b){ send(b, a.getAttribute('download')); }); return true; }
+  return false;
+ }
+ var click = HTMLAnchorElement.prototype.click;
+ HTMLAnchorElement.prototype.click = function(){ if (!grab(this)) return click.call(this); };
+ document.addEventListener('click', function(e){ var a = e.target.closest && e.target.closest('a[download]'); if (a && grab(a)) e.preventDefault(); }, true);
+})();
+"""
 
         /** Web Speech API stand-ins that talk to Android through window.DuneBridge. */
         val SHIM = """

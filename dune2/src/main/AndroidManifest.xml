@@ -123,6 +123,17 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- map files opened with Dune (Files, Drive, email): added to the map's layers -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/geopackage+sqlite3" />
+                <data android:mimeType="application/vnd.google-earth.kml+xml" />
+                <data android:mimeType="application/vnd.google-earth.kmz" />
+                <data android:mimeType="application/geo+json" />
+                <data android:mimeType="application/gpx+xml" />
+            </intent-filter>
             <!-- a car's or headset's voice button -->
             <intent-filter>
                 <action android:name="android.intent.action.VOICE_COMMAND" />

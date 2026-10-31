@@ -1,0 +1,6 @@
+Libraries bundled with Dune's map (see VERSIONS for exact versions):
+- proj4js – MIT – https://github.com/proj4js/proj4js
+- shpjs – MIT – https://github.com/calvinmetcalf/shapefile-js
+- @tmcw/togeojson – BSD-2-Clause – https://github.com/placemark/togeojson
+- sql.js – MIT – https://github.com/sql-js/sql.js (SQLite is public domain)
+- fflate – MIT – https://github.com/101arrowz/fflate
