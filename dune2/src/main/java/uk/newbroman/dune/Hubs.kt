@@ -9,6 +9,7 @@ import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -109,7 +110,10 @@ fun HubScreen(vm: LauncherVM) {
     val scope = rememberCoroutineScope()
     val gestures = rememberOverscrollGestures(up = { vm.screen = Screen.DRAWER }, down = { Actions.expandNotifications(ctx) })
 
-    if (s.showSky.value) {
+    if (s.useWallpaper.value) {
+        // A light veil over the wallpaper so white text reads on any picture.
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0x73000000)))
+    } else if (s.showSky.value) {
         val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME && vm.currentHub == "home", vm.skyLat, vm.skyLon)
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
     }
@@ -128,8 +132,10 @@ fun HubScreen(vm: LauncherVM) {
     LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == 0) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
         val id = vm.jumpHub ?: return@LaunchedEffect
-        vm.jumpHub = null   // clear first, so a cut-short jump can't leave the next tap ignored
-        hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { pager.animateScrollToPage(it) }
+        // Clearing the request restarts this effect, which would cancel a scroll still in progress
+        // (it stopped one hub short). So the scroll runs in its own scope, outside this effect.
+        vm.jumpHub = null
+        hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { i -> scope.launch { pager.animateScrollToPage(i) } }
             ?: ctx.toast("Add the ${Hubs.byId(id)?.title ?: id} hub in Settings › Hubs")
     }
 

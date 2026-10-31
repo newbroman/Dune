@@ -197,14 +197,17 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     val savedTick by Tracks.saved.collectAsState()
     var trackMenu by remember { mutableStateOf<List<SavedTrack>?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val trackScope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(vm.mapTrackRequest) {
         val path = vm.mapTrackRequest ?: return@LaunchedEffect
-        vm.mapTrackRequest = null
+        vm.mapTrackRequest = null   // (restarts this effect, so the work below runs in its own scope)
+        trackScope.launch {
         val f = java.io.File(path)
         val (pts, info) = withContext(Dispatchers.IO) { runCatching { TrackMath.parseGpx(f.readText()) }.getOrDefault(emptyList()) to Tracks.list(act).firstOrNull { it.file == f } }
         showing = info; showingPts = pts
         if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn when the map finishes loading
         else if (ready[0]) web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
+        }
     }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }

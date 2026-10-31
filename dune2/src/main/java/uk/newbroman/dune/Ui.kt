@@ -112,7 +112,9 @@ fun DuneApp(vm: LauncherVM) {
             onSurface = Fg, onBackground = Fg, outline = Faint, surfaceVariant = Color(0xFF1C1A17),
         )
     ) {
-        Surface(Modifier.fillMaxSize(), color = Bg) {
+        // On the home hubs your wallpaper shows through (if chosen); every other screen stays solid black.
+        val seeThrough = vm.store.useWallpaper.value && vm.screen == Screen.HOME
+        Surface(Modifier.fillMaxSize(), color = if (seeThrough) androidx.compose.ui.graphics.Color.Transparent else Bg) {
             Crossfade(vm.screen, label = "screen") {
                 when (it) {
                     Screen.HOME -> HubScreen(vm)
@@ -816,7 +818,8 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Weather", s.showWeather) }
         item { Toggle("Inbox summary", s.showNotifs) }
         item { Toggle("Tasks", s.showTasks) }
-        item { Toggle("Sky background", s.showSky) }
+        item { Toggle("Phone wallpaper behind the home screen", s.useWallpaper) }
+        item { Toggle("Sky background (when not using the wallpaper)", s.showSky) }
         item { Toggle("Weather on the sky", s.skyWeather) }
         item { Toggle("Turn the sky with the compass", s.skyCompass) }
         item { Toggle("App groups", s.showGroups) }
