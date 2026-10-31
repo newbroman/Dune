@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -108,6 +109,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
         WebView(act).apply {
+            // Fill the page. Without this the WebView sizes itself to its content, and a full-height
+            // map has no content height – it collapses to nothing (the "black box").
+            layoutParams = android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.setGeolocationEnabled(true)
@@ -223,9 +227,18 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                     val text = (place?.let { "$it\n" } ?: "") + "https://maps.google.com/?q=${l.latitude},${l.longitude}"
                     act.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share my location"))
                 }
-                if (source.mapy == null) MapAction("Maps ↗") {
-                    val l = here!!
-                    act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=${l.latitude},${l.longitude}")))
+                Box {
+                    var apps by remember { mutableStateOf<List<MapApp>?>(null) }
+                    MapAction("open in ▾") { apps = mapApps(act, vm) }
+                    androidx.compose.material3.DropdownMenu(apps != null, onDismissRequest = { apps = null }) {
+                        if (apps?.isEmpty() == true) androidx.compose.material3.DropdownMenuItem(text = { Text("No map apps found") }, onClick = { apps = null })
+                        apps?.forEach { m ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(m.label + if (m.geo) "" else "  (opens the app)") },
+                                leadingIcon = { m.icon?.let { androidx.compose.foundation.Image(it, null, Modifier.padding(0.dp).width(28.dp)) } },
+                                onClick = { apps = null; openIn(act, m, here!!, place) })
+                        }
+                    }
                 }
             }
         }
@@ -281,4 +294,34 @@ fun WeatherPage(vm: LauncherVM, gestures: androidx.compose.ui.input.nestedscroll
             }
         }
     }
+}
+
+/** A map app on the phone. [geo] apps can be handed your position; others are just opened. */
+data class MapApp(val pkg: String, val label: String, val geo: Boolean, val icon: androidx.compose.ui.graphics.ImageBitmap?)
+
+private val MAP_WORDS = listOf("map", "mapy", "waze", "earth", "komoot", "outdoor", "hiking", "hike", "trail", "osm",
+    "turyst", "navig", "gps", "ordnance", "os maps", "citymapper", "here we")
+
+/** Every app that can show a place (geo: links), plus installed apps that look like maps by name. */
+fun mapApps(ctx: Context, vm: LauncherVM): List<MapApp> {
+    val pm = ctx.packageManager
+    fun icon(pkg: String) = runCatching {
+        val d = pm.getApplicationIcon(pkg)
+        android.graphics.Bitmap.createBitmap(96, 96, android.graphics.Bitmap.Config.ARGB_8888).also { b ->
+            val c = android.graphics.Canvas(b); d.setBounds(0, 0, 96, 96); d.draw(c)
+        }.asImageBitmap()
+    }.getOrNull()
+    val geo = pm.queryIntentActivities(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=0,0")), PackageManager.MATCH_ALL)
+        .map { it.activityInfo.packageName }.distinct().filter { it != ctx.packageName }
+    val byName = vm.apps.filter { a -> val l = a.label.lowercase(); MAP_WORDS.any { l.contains(it) } }.map { it.pkg }
+    return (geo + byName).distinct().map { p ->
+        MapApp(p, vm.labelFor(p), p in geo, icon(p))
+    }.sortedWith(compareBy({ !it.geo }, { it.label.lowercase() }))
+}
+
+fun openIn(ctx: Context, m: MapApp, l: Location, place: String?) {
+    val q = "${l.latitude},${l.longitude}" + (place?.let { "(" + Uri.encode(it) + ")" } ?: "")
+    val i = if (m.geo) Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=$q")).setPackage(m.pkg)
+            else ctx.packageManager.getLaunchIntentForPackage(m.pkg)
+    if (i != null) ctx.tryStart(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

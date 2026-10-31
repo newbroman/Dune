@@ -61,6 +61,10 @@
         <intent>
             <action android:name="android.intent.action.DIAL" />
         </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
         <package android:name="com.whatsapp" />
         <package android:name="com.coinbase.android" />
         <package android:name="com.spotify.music" />
