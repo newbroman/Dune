@@ -79,8 +79,11 @@ class MainActivity : ComponentActivity() {
 
     private var rozmowaWeb: SpeechWebView? = null
     fun rozmowa(): SpeechWebView = rozmowaWeb ?: SpeechWebView(this, SpeechWebView.ROZMOWA).also { rozmowaWeb = it }
+    private var clozeWeb: SpeechWebView? = null
+    /** Cloze (the sentence trainer), kept alive like Rozmowa so a round survives swipes. */
+    fun cloze(): SpeechWebView = clozeWeb ?: SpeechWebView(this, SpeechWebView.CLOZE).also { clozeWeb = it }
 
-    override fun onDestroy() { runCatching { unregisterReceiver(wakeReceiver) }; rozmowaWeb?.destroy(); rozmowaWeb = null; super.onDestroy() }
+    override fun onDestroy() { runCatching { unregisterReceiver(wakeReceiver) }; rozmowaWeb?.destroy(); rozmowaWeb = null; clozeWeb?.destroy(); clozeWeb = null; super.onDestroy() }
 
     // ---------- widgets
 

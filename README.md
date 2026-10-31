@@ -11,7 +11,8 @@
 > a network scan that finds and names printers, speakers, computers and cameras with their setup pages, printer and speaker
 > set-up, speed test, public IP, VPN and L14 status). **Weather** is now Dune's own forecast (now, rain in the next two
 > hours, 24 hours, the week, sun and UV; widgets optional below), the **Map** finds places and gives walking, cycling and driving
-> routes, and every hub's *apps ▾* list can have apps added or removed. **Claude** (your Claude projects: open one in the Claude app, its GitHub repo's last push and build, ask about it). Coming: Agenda, Jobs,
+> routes, and every hub's *apps ▾* list can have apps added or removed. **Claude** (your Claude projects: open one in the Claude app, its GitHub repo's last push and build, ask about it). **Learn** (Cloze – newbroman.github.io/cloze – inside Dune with voice: fill the missing word in real Polish,
+> Welsh, German and Norwegian sentences; due reviews and streak on Home). Coming: Agenda, Jobs,
 > Wallet, Learn, Machines. Releases carry both `Dune.apk` and `Dune2.apk`.
 
 Black, text-only home screen with: clock and date, weather (Open-Meteo, no API key),

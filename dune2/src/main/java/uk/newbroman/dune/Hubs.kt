@@ -72,11 +72,11 @@ interface Hub {
 }
 
 object Hubs {
-    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, ClaudeHub, MusicHub, RecordHub, ConnectHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
+    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, ClaudeHub, LearnHub, MusicHub, RecordHub, ConnectHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
     /** Hubs switched on by default; a new one in this list is added once, after an update. */
-    private val DEFAULT_ON = listOf("home", "comms", "tasks", "claude", "music", "record", "connect", "map", "weather")
+    private val DEFAULT_ON = listOf("home", "comms", "tasks", "claude", "learn", "music", "record", "connect", "map", "weather")
     /** Hubs added after 2.1 (before this check existed), so phones updating from 2.0/2.1 are offered them. */
-    private val NEW_IN_2_2 = listOf("record", "music", "connect", "claude")
+    private val NEW_IN_2_2 = listOf("record", "music", "connect", "claude", "learn")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
     fun enabled(s: Store): List<Hub> {

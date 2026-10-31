@@ -123,6 +123,7 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.WIDGET_PICK -> WidgetPickerScreen(vm)
                     Screen.ROZMOWA -> RozmowaFull()
                     Screen.CAMERA -> CameraScreen(vm)
+                    Screen.CLOZE -> ClozeFull()
                 }
             }
             vm.moving?.let { MoveDialog(vm, it) }

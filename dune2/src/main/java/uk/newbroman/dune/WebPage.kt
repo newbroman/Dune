@@ -189,6 +189,7 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
 
     companion object {
         const val ROZMOWA = "https://newbroman.github.io/rozmowa/"
+        const val CLOZE = "https://newbroman.github.io/cloze/"
 
         /** Web Speech API stand-ins that talk to Android through window.DuneBridge. */
         val SHIM = """
