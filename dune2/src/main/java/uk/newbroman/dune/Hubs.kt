@@ -75,12 +75,14 @@ object Hubs {
     val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, RecordHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
     /** Hubs switched on by default; a new one in this list is added once, after an update. */
     private val DEFAULT_ON = listOf("home", "comms", "tasks", "record", "map", "weather")
+    private val NEW_IN_2_2 = listOf("record")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
     fun enabled(s: Store): List<Hub> {
         // Introduce hubs added since this phone last looked (but never re-add one you switched off).
         val known = s.hubsKnown.value.split(',').filter { it.isNotEmpty() }
-        if (known.isEmpty()) s.hubsKnown.set(ALL.joinToString(",") { it.id }.let { all -> all })
+        // First run of a version with this check: everything except the hubs new since 2.1 counts as already offered.
+        if (known.isEmpty()) s.hubsKnown.set(ALL.map { it.id }.filter { it !in NEW_IN_2_2 }.joinToString(","))
         else {
             val fresh = ALL.map { it.id }.filter { it !in known }
             if (fresh.isNotEmpty()) {

@@ -140,7 +140,13 @@ fun hasPerm(ctx: Context, p: String) = ContextCompat.checkSelfPermission(ctx, p)
 fun CameraScreen(vm: LauncherVM) {
     val act = LocalContext.current as MainActivity
     var granted by remember { mutableStateOf(hasPerm(act, Manifest.permission.CAMERA)) }
-    LaunchedEffect(Unit) { if (!granted) act.requestPerm(Manifest.permission.CAMERA) { granted = it; if (!it) vm.goHome() } }
+    LaunchedEffect(Unit) {
+        // One request for everything the camera needs (two at once would cancel each other).
+        val want = if (vm.cameraVideo && !hasPerm(act, Manifest.permission.RECORD_AUDIO)) arrayOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+                   else arrayOf(Manifest.permission.CAMERA)
+        if (!granted) act.requestPerms(want) { r -> granted = r[Manifest.permission.CAMERA] == true || hasPerm(act, Manifest.permission.CAMERA); if (!granted) { vm.goHome(); vm.jumpHub = "record" } }
+        else if (want.size > 1) act.requestPerms(arrayOf(Manifest.permission.RECORD_AUDIO)) { }
+    }
     if (!granted) { Box(Modifier.fillMaxSize().background(Color.Black)); return }
 
     var video by rememberSaveable { mutableStateOf(vm.cameraVideo) }
@@ -158,9 +164,23 @@ fun CameraScreen(vm: LauncherVM) {
     }
     imageCapture.flashMode = flash
 
+    // Keep photos and videos the right way up (Dune handles rotation itself, so CameraX isn't told).
+    DisposableEffect(Unit) {
+        val l = object : android.view.OrientationEventListener(act) {
+            override fun onOrientationChanged(o: Int) {
+                if (o == ORIENTATION_UNKNOWN) return
+                val r = when (o) { in 45..134 -> android.view.Surface.ROTATION_270; in 135..224 -> android.view.Surface.ROTATION_180
+                    in 225..314 -> android.view.Surface.ROTATION_90; else -> android.view.Surface.ROTATION_0 }
+                imageCapture.targetRotation = r; videoCapture.targetRotation = r
+            }
+        }
+        l.enable(); onDispose { l.disable() }
+    }
     DisposableEffect(back, video) {
+        var disposed = false
         val future = ProcessCameraProvider.getInstance(act)
         future.addListener({
+            if (disposed) return@addListener
             runCatching {
                 val p = future.get()
                 p.unbindAll()
@@ -169,7 +189,7 @@ fun CameraScreen(vm: LauncherVM) {
                 if (video) p.bindToLifecycle(act, sel, pv, videoCapture) else p.bindToLifecycle(act, sel, pv, imageCapture)
             }.onFailure { act.toast("Camera unavailable: ${it.message}") }
         }, ContextCompat.getMainExecutor(act))
-        onDispose { runCatching { future.get().unbindAll() } }
+        onDispose { disposed = true; if (future.isDone) runCatching { future.get().unbindAll() } }
     }
     DisposableEffect(Unit) { onDispose { recording?.stop() } }
 
@@ -194,6 +214,7 @@ fun CameraScreen(vm: LauncherVM) {
                 recStart = System.currentTimeMillis()
                 recording = pending.start(ContextCompat.getMainExecutor(act)) { e ->
                     if (e is VideoRecordEvent.Finalize) {
+                        recording = null
                         if (e.hasError()) act.toast("Video not saved (${e.error})") else { last = e.outputResults.outputUri; Gallery.changed.value++ }
                     }
                 }
@@ -265,6 +286,7 @@ class AudioRecService : Service() {
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
 
     override fun onCreate() {
         super.onCreate()
@@ -307,10 +329,14 @@ class AudioRecService : Service() {
 
     override fun onDestroy() {
         main.removeCallbacksAndMessages(null)
-        rec?.let { r -> runCatching { r.stop() }; r.release() }
+        val ok = rec?.let { r -> val s = runCatching { r.stop() }.isSuccess; r.release(); s } ?: false
         rec = null
         runCatching { pfd?.close() }
-        uri?.let { u -> runCatching { contentResolver.update(u, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) } }
+        uri?.let { u ->
+            // stop() fails on a recording of under a second: don't leave a broken file behind
+            if (ok) runCatching { contentResolver.update(u, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null) }
+            else { runCatching { contentResolver.delete(u, null, null) }; toast("Too short to keep") }
+        }
         AudioRec.recording.value = false; AudioRec.level.value = 0f
         Gallery.changed.value++
         WakeWord.resume(this)
@@ -326,7 +352,7 @@ object Gallery {
     val changed = MutableStateFlow(0)
 
     fun readPermissions(): Array<String> = when {
-        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_AUDIO)
+        Build.VERSION.SDK_INT >= 33 -> arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
         else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
     fun canRead(ctx: Context) = readPermissions().all { hasPerm(ctx, it) } ||
@@ -457,10 +483,7 @@ object RecordHub : Hub {
                 // Capture
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                     BigAction("📷", "Photo") { vm.cameraVideo = false; vm.screen = Screen.CAMERA }
-                    BigAction("🎥", "Video") {
-                        act.requestPerm(Manifest.permission.RECORD_AUDIO) { }
-                        vm.cameraVideo = true; vm.screen = Screen.CAMERA
-                    }
+                    BigAction("🎥", "Video") { vm.cameraVideo = true; vm.screen = Screen.CAMERA }
                     AudioButton()
                     val trk by Tracks.recording.collectAsState()
                     BigAction(if (trk) "■" else "⌖", if (trk) "Stop track" else "Track") {

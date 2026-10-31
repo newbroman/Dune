@@ -176,6 +176,15 @@ class MainActivity : ComponentActivity() {
     }
     fun pickCoinbaseKeyFile() = keyFileLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream", "*/*"))
 
+    private var permsCallback: ((Map<String, Boolean>) -> Unit)? = null
+    private val permsLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val cb = permsCallback; permsCallback = null; cb?.invoke(it)
+    }
+    fun requestPerms(permissions: Array<String>, cb: (Map<String, Boolean>) -> Unit) {
+        permsCallback = cb
+        permsLauncher.launch(permissions)
+    }
+
     fun requestPerm(permission: String, cb: (Boolean) -> Unit) {
         permCallback = cb
         permLauncher.launch(permission)

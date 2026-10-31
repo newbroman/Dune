@@ -273,7 +273,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(if (any) "Only your rough area is allowed" else "Dune needs your location for the map", color = Fg, fontSize = 16.sp)
                 Text("Allow precise location", color = Sand, fontSize = 16.sp, modifier = Modifier.padding(top = 10.dp)
-                    .combinedClickable { act.requestPerm(Manifest.permission.ACCESS_FINE_LOCATION) { granted++ } }.padding(8.dp))
+                    .combinedClickable { act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { granted++ } }.padding(8.dp))
             }
         }
     }

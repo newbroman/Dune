@@ -84,6 +84,8 @@ object Tracks {
     val points = MutableStateFlow<List<TrackPoint>>(emptyList())
     /** Bumped when the list of saved tracks changes. */
     val saved = MutableStateFlow(0)
+    /** Saving and reading GPX files happens here, never on the main thread. */
+    val io: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()
 
     fun dir(ctx: Context) = File(ctx.filesDir, "tracks").apply { mkdirs() }
 
@@ -139,6 +141,7 @@ class TrackService : Service() {
     private var lastSaved = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_NOT_STICKY
 
     @SuppressLint("MissingPermission")
     override fun onCreate() {
@@ -164,13 +167,18 @@ class TrackService : Service() {
         if (cur.isNotEmpty() && TrackMath.metres(cur.last(), p) < 3) return   // standing still
         Tracks.points.value = cur + p
         // Save as we go, so a crash or a flat battery doesn't lose the walk.
-        if (Tracks.points.value.size - lastSaved >= 30) { lastSaved = Tracks.points.value.size; runCatching { Tracks.save(this, Tracks.points.value) } }
+        if (Tracks.points.value.size - lastSaved >= 30) {
+            lastSaved = Tracks.points.value.size
+            val snap = Tracks.points.value; val ctx = applicationContext
+            Tracks.io.execute { runCatching { Tracks.save(ctx, snap) } }
+        }
     }
 
     override fun onDestroy() {
         runCatching { getSystemService(LocationManager::class.java).removeUpdates(listener) }
         Tracks.recording.value = false
-        runCatching { Tracks.save(this, Tracks.points.value) }
+        val snap = Tracks.points.value; val ctx = applicationContext
+        Tracks.io.execute { runCatching { Tracks.save(ctx, snap) } }
         super.onDestroy()
     }
 }

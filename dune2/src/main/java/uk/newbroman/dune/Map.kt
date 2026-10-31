@@ -55,6 +55,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 private fun hasFine(ctx: Context) = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -121,6 +122,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     // Mapy.com is a whole site, so it is (re)loaded centred on you once a fix arrives.
     var siteCentred by remember { mutableStateOf(false) }
 
+    var showing by remember { mutableStateOf<SavedTrack?>(null) }
+    var showingPts by remember { mutableStateOf<List<TrackPoint>?>(null) }
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
         WebView(act).apply {
@@ -138,6 +141,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                     if (url?.startsWith(LEAFLET) == true) {
                         here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null)
                         v.evaluateJavascript("setTrack(${trackJs(Tracks.points.value)})", null)
+                        showingPts?.let { v.evaluateJavascript("showTrack(${trackJs(it)})", null) }   // a saved track asked for before the map loaded
                     }
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
@@ -179,15 +183,15 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     }
     val savedTick by Tracks.saved.collectAsState()
     var trackMenu by remember { mutableStateOf<List<SavedTrack>?>(null) }
-    var showing by remember { mutableStateOf<SavedTrack?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     LaunchedEffect(vm.mapTrackRequest) {
         val path = vm.mapTrackRequest ?: return@LaunchedEffect
         vm.mapTrackRequest = null
         val f = java.io.File(path)
-        val pts = runCatching { TrackMath.parseGpx(f.readText()) }.getOrDefault(emptyList())
-        showing = Tracks.list(act).firstOrNull { it.file == f }
-        if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
-        web.postDelayed({ web.evaluateJavascript("showTrack(${trackJs(pts)})", null) }, 900)
+        val (pts, info) = withContext(Dispatchers.IO) { runCatching { TrackMath.parseGpx(f.readText()) }.getOrDefault(emptyList()) to Tracks.list(act).firstOrNull { it.file == f } }
+        showing = info; showingPts = pts
+        if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn when the map finishes loading
+        else web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
     }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
@@ -247,7 +251,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             // Track: record where you go (keeps going with the screen off), or look at a saved one.
             MapAction(if (recording) "■ stop" else "● track") {
                 if (recording) { Tracks.stop(act); act.toast("Track saved") }
-                else if (!fine) act.requestPerm(Manifest.permission.ACCESS_FINE_LOCATION) { granted++ }
+                else if (!fine) act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { granted++ }
                 else {
                     act.requestPerm(Manifest.permission.POST_NOTIFICATIONS) { }
                     if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // Mapy.com's own site can't show Dune's line
@@ -255,26 +259,29 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
             }
             Box {
-                MapAction("tracks ▾") { trackMenu = Tracks.list(act) }
+                MapAction("tracks ▾") { scope.launch { trackMenu = withContext(Dispatchers.IO) { Tracks.list(act) } } }
                 androidx.compose.material3.DropdownMenu(trackMenu != null, onDismissRequest = { trackMenu = null }) {
                     if (trackMenu?.isEmpty() == true) androidx.compose.material3.DropdownMenuItem(text = { Text("No saved tracks yet") }, onClick = { trackMenu = null })
                     if (showing != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Hide “${showing!!.name}”") }, onClick = {
-                        trackMenu = null; showing = null; web.evaluateJavascript("hideTrack()", null) })
+                        trackMenu = null; showing = null; showingPts = null; web.evaluateJavascript("hideTrack()", null) })
                     trackMenu?.forEach { tr ->
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(tr.name.removePrefix("Track ") + "\n" + String.format(Locale.UK, "%.2f km · %d min", tr.km, tr.minutes)) },
                             trailingIcon = { Row {
                                 Text("share", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable { trackMenu = null; Tracks.share(act, tr.file) }.padding(8.dp))
                                 Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
-                                    Tracks.delete(tr.file); if (showing?.file == tr.file) { showing = null; web.evaluateJavascript("hideTrack()", null) }
-                                    trackMenu = Tracks.list(act)
+                                    Tracks.delete(tr.file); if (showing?.file == tr.file) { showing = null; showingPts = null; web.evaluateJavascript("hideTrack()", null) }
+                                    scope.launch { trackMenu = withContext(Dispatchers.IO) { Tracks.list(act) } }
                                 }.padding(8.dp))
                             } },
                             onClick = {
                                 trackMenu = null; showing = tr
-                                if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
-                                val pts = TrackMath.parseGpx(tr.file.readText())
-                                web.postDelayed({ web.evaluateJavascript("showTrack(${trackJs(pts)})", null) }, if (source.site != null) 900 else 0)
+                                scope.launch {
+                                    val pts = withContext(Dispatchers.IO) { runCatching { TrackMath.parseGpx(tr.file.readText()) }.getOrDefault(emptyList()) }
+                                    showingPts = pts
+                                    if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // drawn on load
+                                    else web.evaluateJavascript("showTrack(${trackJs(pts)})", null)
+                                }
                             })
                     }
                 }
@@ -335,7 +342,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(if (any) "Only your rough area is allowed" else "Dune needs your location for the map", color = Fg, fontSize = 16.sp)
                 Text("Allow precise location", color = Sand, fontSize = 16.sp, modifier = Modifier.padding(top = 10.dp)
-                    .combinedClickable { act.requestPerm(Manifest.permission.ACCESS_FINE_LOCATION) { granted++ } }.padding(8.dp))
+                    .combinedClickable { act.requestPerms(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) { granted++ } }.padding(8.dp))
             }
         }
     }
