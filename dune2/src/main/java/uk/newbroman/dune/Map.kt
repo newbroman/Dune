@@ -38,6 +38,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -134,7 +135,10 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(v: WebView, r: WebResourceRequest): WebResourceResponse? = loader.shouldInterceptRequest(r.url)
                 override fun onPageFinished(v: WebView, url: String?) {
-                    if (url?.startsWith(LEAFLET) == true) { here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null) }
+                    if (url?.startsWith(LEAFLET) == true) {
+                        here?.let { push(v, it) }; v.evaluateJavascript("setAlign($align)", null)
+                        v.evaluateJavascript("setTrack(${trackJs(Tracks.points.value)})", null)
+                    }
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val h = r.url.host ?: return false
@@ -164,6 +168,18 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}'); setRadar(${s.radar})", null)
         else web.loadUrl(leafletUrl(s))
     }
+    // The track being recorded: draw new points as they arrive.
+    val recording by Tracks.recording.collectAsState()
+    val trackPts by Tracks.points.collectAsState()
+    var drawn by remember { mutableIntStateOf(0) }
+    LaunchedEffect(trackPts) {
+        if (trackPts.size < drawn) { web.evaluateJavascript("setTrack(${trackJs(trackPts)})", null) }
+        else trackPts.drop(drawn).forEach { p -> web.evaluateJavascript("addTrackPoint(${p.lat},${p.lon})", null) }
+        drawn = trackPts.size
+    }
+    val savedTick by Tracks.saved.collectAsState()
+    var trackMenu by remember { mutableStateOf<List<SavedTrack>?>(null) }
+    var showing by remember { mutableStateOf<SavedTrack?>(null) }
     LaunchedEffect(vm.mapRequest) {
         vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
     }
@@ -207,8 +223,9 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box {
+            Box(Modifier.weight(1f)) {
                 Text(source.label + "  ▾", color = Fg, fontSize = 17.sp, fontWeight = FontWeight.Light, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     modifier = Modifier.combinedClickable { picking = true }.padding(vertical = 8.dp))
                 androidx.compose.material3.DropdownMenu(picking, onDismissRequest = { picking = false }) {
                     MAP_SOURCES.forEach { s ->
@@ -218,7 +235,41 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                     }
                 }
             }
-            Spacer(Modifier.weight(1f))
+            // Track: record where you go (keeps going with the screen off), or look at a saved one.
+            MapAction(if (recording) "■ stop" else "● track") {
+                if (recording) { Tracks.stop(act); act.toast("Track saved") }
+                else if (!fine) act.requestPerm(Manifest.permission.ACCESS_FINE_LOCATION) { granted++ }
+                else {
+                    act.requestPerm(Manifest.permission.POST_NOTIFICATIONS) { }
+                    if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })   // Mapy.com's own site can't show Dune's line
+                    Tracks.start(act); drawn = 0
+                }
+            }
+            Box {
+                MapAction("tracks ▾") { trackMenu = Tracks.list(act) }
+                androidx.compose.material3.DropdownMenu(trackMenu != null, onDismissRequest = { trackMenu = null }) {
+                    if (trackMenu?.isEmpty() == true) androidx.compose.material3.DropdownMenuItem(text = { Text("No saved tracks yet") }, onClick = { trackMenu = null })
+                    if (showing != null) androidx.compose.material3.DropdownMenuItem(text = { Text("Hide “${showing!!.name}”") }, onClick = {
+                        trackMenu = null; showing = null; web.evaluateJavascript("hideTrack()", null) })
+                    trackMenu?.forEach { tr ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(tr.name.removePrefix("Track ") + "\n" + String.format(Locale.UK, "%.2f km · %d min", tr.km, tr.minutes)) },
+                            trailingIcon = { Row {
+                                Text("share", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable { trackMenu = null; Tracks.share(act, tr.file) }.padding(8.dp))
+                                Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                                    Tracks.delete(tr.file); if (showing?.file == tr.file) { showing = null; web.evaluateJavascript("hideTrack()", null) }
+                                    trackMenu = Tracks.list(act)
+                                }.padding(8.dp))
+                            } },
+                            onClick = {
+                                trackMenu = null; showing = tr
+                                if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
+                                val pts = TrackMath.parseGpx(tr.file.readText())
+                                web.postDelayed({ web.evaluateJavascript("showTrack(${trackJs(pts)})", null) }, if (source.site != null) 900 else 0)
+                            })
+                    }
+                }
+            }
             // Solstice and lunar alignments, as on the Spheres weather page (Dune's own maps only).
             MapAction(if (align) "☀ on" else "☀ lines") {
                 align = !align; prefs.edit().putBoolean("mapAlign", align).apply()
@@ -229,6 +280,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             when {
+                recording -> "● Recording  " + Tracks.stats(trackPts)
+                showing != null -> "${showing!!.name.removePrefix("Track ")} · " + String.format(Locale.UK, "%.2f km · %d min", showing!!.km, showing!!.minutes)
                 !any -> "Allow location to see where you are"
                 here == null -> if (active) "Finding you…" else " "
                 else -> listOfNotNull(place, latLon(here!!), "±${here!!.accuracy.toInt()} m").joinToString("  ·  ")
@@ -352,3 +405,5 @@ fun openIn(ctx: Context, m: MapApp, l: Location?, place: String?) {
             else ctx.packageManager.getLaunchIntentForPackage(m.pkg)
     if (i != null) ctx.tryStart(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
+
+private fun trackJs(p: List<TrackPoint>) = p.joinToString(",", "[", "]") { "[${it.lat},${it.lon}]" }

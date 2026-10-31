@@ -195,6 +195,7 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         widgetHost = AppWidgetHost(applicationContext, WIDGET_HOST_ID)
+        if (savedInstanceState == null) intent?.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it }
         if (savedInstanceState == null && intent != null && !voiceIntent(intent) && intent.getBooleanExtra("drive", false)) {
             intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE
         }
@@ -207,7 +208,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (voiceIntent(intent)) return
         if (intent.getBooleanExtra("drive", false)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
-        else vm.goHome()
+        else { vm.goHome(); intent.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it } }
     }
 
     /** "OK Computer" was heard, or a car / headset voice button was pressed: open the Speak prompt. */

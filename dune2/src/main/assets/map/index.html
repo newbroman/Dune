@@ -146,6 +146,18 @@
   };
   map.on('moveend zoomend', drawAlign);
 
+  // ---- Tracks: the one being recorded (gold) and a saved one being looked at (blue).
+  let live = L.polyline([], { color: '#d9b26a', weight: 4, opacity: .95, interactive: false }).addTo(map);
+  let saved = null;
+  window.setTrack = (pts) => { live.setLatLngs(pts); };
+  window.addTrackPoint = (lat, lon) => { live.addLatLng([lat, lon]); };
+  window.showTrack = (pts) => {
+    if (saved) map.removeLayer(saved);
+    saved = L.polyline(pts, { color: '#7fb2ff', weight: 4, opacity: .9, interactive: false }).addTo(map);
+    if (pts.length > 1) { follow = false; if (window.Dune) Dune.following(false); map.fitBounds(saved.getBounds(), { padding: [24, 24] }); }
+  };
+  window.hideTrack = () => { if (saved) { map.removeLayer(saved); saved = null; } };
+
   window.centre = () => { follow = true; if (me) map.setView(me.getLatLng(), Math.max(map.getZoom(), 15)); };
 </script>
 </body>
