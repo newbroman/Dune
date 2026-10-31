@@ -126,7 +126,6 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var l14ShowAll by mutableStateOf(false)
     /** Bumped on resume / home press so screens can re-read system state and scroll to top. */
     var resumeTick by mutableIntStateOf(0)
-        private set
 
     private var appsJob: Job? = null
     private var weatherJob: Job? = null
@@ -525,6 +524,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     fun onResume() {
         resumeTick++
+        SkyWallpaper.afterChoosing(ctx)
+        viewModelScope.launch { SkyWallpaper.paintLock(ctx) }
         refreshCoinbase()
         refreshWeather()
         checkL14()
@@ -554,6 +555,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
                 skyLat = p.lat; skyLon = p.lon
                 weather = Weather.fetch(p.lat, p.lon, p.name)
                 SkyWallpaper.remember(ctx, p.lat, p.lon, weather!!)   // the Dune Sky wallpaper uses the same place and weather
+                launch { SkyWallpaper.paintLock(ctx, true) }
                 weatherAt = System.currentTimeMillis(); weatherKey = place; weatherMsg = null
             } catch (e: Exception) {
                 weatherMsg = "Weather unavailable – tap to retry"

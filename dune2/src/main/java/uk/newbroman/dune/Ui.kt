@@ -820,8 +820,22 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Tasks", s.showTasks) }
         item { Toggle("Sky background", s.showSky) }
         item {
-            LinkRow(if (SkyWallpaper.isActive(act)) "✓ Dune Sky is your wallpaper – change it" else "Use the sky as your wallpaper and lock screen") { SkyWallpaper.choose(act) }
-            Note("Sets “Dune Sky” – the same sky, planets and weather – as Android's wallpaper; choose home and lock screen to see it when you wake the phone.")
+            val tick = vm.resumeTick   // re-read the wallpaper state on returning from Android's screen
+            val active = remember(tick) { SkyWallpaper.isActive(act) }
+            val onLock = remember(tick) { SkyWallpaper.liveOnLock(act) }
+            LinkRow(when { onLock -> "✓ Dune Sky is on the home and lock screen – change it"
+                active -> "✓ Dune Sky is your wallpaper – change it"
+                else -> "Use the sky as your wallpaper and lock screen" }) { SkyWallpaper.choose(act) }
+            if (active && !onLock && !s.skyLock.value) LinkRow("The lock screen still has the old picture – put the sky there") {
+                act.toast(if (SkyWallpaper.moveLiveToLock(act)) "Dune Sky is on the lock screen now" else "This phone's lock screen won't take it – turn on the sky picture below")
+                vm.resumeTick++
+            }
+            Note("Sets “Dune Sky” – the same sky, planets and weather, moving – as Android's wallpaper, so it's there when you wake the phone.")
+        }
+        item {
+            val scope = rememberCoroutineScope()
+            Toggle("Sky picture on the lock screen", s.skyLock) { SkyWallpaper.setPicture(act, it, scope) }
+            Note("For lock screens that won't show a moving wallpaper: a still picture of the sky, redrawn as the sky and weather change.")
         }
         item { Toggle("Show the phone's wallpaper behind Dune instead of drawing the sky", s.useWallpaper) }
         item { Toggle("Weather on the sky", s.skyWeather) }
@@ -960,13 +974,13 @@ private fun WakeWordSettings(vm: LauncherVM) {
 }
 
 @Composable
-internal fun Toggle(label: String, f: Store.Flag) {
+internal fun Toggle(label: String, f: Store.Flag, onChange: (Boolean) -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().combinedClickable { f.set(!f.value) }.padding(vertical = 4.dp),
+        Modifier.fillMaxWidth().combinedClickable { f.set(!f.value); onChange(f.value) }.padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(label, color = Fg, fontSize = 17.sp)
-        Switch(checked = f.value, onCheckedChange = { f.set(it) })
+        Switch(checked = f.value, onCheckedChange = { f.set(it); onChange(it) })
     }
 }
 
