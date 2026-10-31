@@ -164,6 +164,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var inboxAnswer by mutableStateOf<String?>(null)
     /** Ask the home pager to move to a page (e.g. the inbox). */
     var jumpTo by mutableStateOf<Int?>(null)
+    /** Ask the map page to switch to a map (by id), e.g. the rain radar from the weather page. */
+    var mapRequest by mutableStateOf<String?>(null)
     /** "weather" while choosing the widget for the weather spot; null for an ordinary widget. */
     var widgetTarget by mutableStateOf<String?>(null)
 

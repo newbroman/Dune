@@ -61,14 +61,17 @@ private fun hasAny(ctx: Context) = hasFine(ctx) ||
     ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
 /** A choice in the map page's menu: a Mapy.com map (its own site) or a tile map drawn by Dune. */
-data class MapSource(val id: String, val label: String, val mapy: String? = null, val layer: String? = null)
+data class MapSource(val id: String, val label: String, val site: ((Location?) -> String)? = null,
+                     val layer: String? = null, val radar: Boolean = false)
 
 val MAP_SOURCES = listOf(
-    MapSource("mapy-basic", "Mapy.com", mapy = "basic"),
-    MapSource("mapy-outdoor", "Mapy.com · Outdoor", mapy = "outdoor"),
-    MapSource("mapy-aerial", "Mapy.com · Aerial", mapy = "aerial"),
-    MapSource("mapy-winter", "Mapy.com · Winter", mapy = "winter"),
-    MapSource("mapy-traffic", "Mapy.com · Traffic", mapy = "traffic"),
+    MapSource("mapy-basic", "Mapy.com", site = { mapyUrl("basic", it) }),
+    MapSource("mapy-outdoor", "Mapy.com · Outdoor", site = { mapyUrl("outdoor", it) }),
+    MapSource("mapy-aerial", "Mapy.com · Aerial", site = { mapyUrl("aerial", it) }),
+    MapSource("mapy-winter", "Mapy.com · Winter", site = { mapyUrl("winter", it) }),
+    MapSource("mapy-traffic", "Mapy.com · Traffic", site = { mapyUrl("traffic", it) }),
+    MapSource("radar", "Rain radar (RainViewer)", layer = "dark", radar = true),
+    MapSource("windy", "Windy · radar and forecast", site = { windyUrl(it) }),
     MapSource("dark", "Dune dark", layer = "dark"),
     MapSource("osm", "OpenStreetMap", layer = "osm"),
     MapSource("topo", "OpenTopoMap (contours)", layer = "topo"),
@@ -76,11 +79,20 @@ val MAP_SOURCES = listOf(
     MapSource("sat", "Satellite (Esri)", layer = "sat"),
 )
 
+/** Windy's free embeddable map, showing the radar (animated) with a forecast at your spot. */
+fun windyUrl(l: Location?): String {
+    val (lat, lon) = l?.let { it.latitude to it.longitude } ?: (54.4 to -3.0)
+    return String.format(Locale.US, "https://embed.windy.com/embed2.html?lat=%.4f&lon=%.4f&detailLat=%.4f&detailLon=%.4f" +
+        "&zoom=%d&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&type=map" +
+        "&location=coordinates&detail=&metricWind=mph&metricTemp=%%C2%%B0C&radarRange=-1", lat, lon, lat, lon, if (l != null) 8 else 5)
+}
+
 /** Mapy.com's documented link: centre is longitude first. */
 fun mapyUrl(mapset: String, l: Location?) = "https://mapy.com/fnc/v1/showmap?mapset=$mapset" +
     (l?.let { String.format(Locale.US, "&center=%.6f,%.6f&zoom=16&marker=true", it.longitude, it.latitude) } ?: "")
 
 private const val LEAFLET = "https://appassets.androidplatform.net/assets/map/index.html"
+private fun leafletUrl(s: MapSource) = "$LEAFLET?layer=${s.layer}" + if (s.radar) "&radar=1" else ""
 
 /** "53.13702, -4.36712" – five decimals is about a metre. */
 fun latLon(l: Location) = String.format(Locale.UK, "%.5f, %.5f", l.latitude, l.longitude)
@@ -106,7 +118,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     var lastPkg by remember { mutableStateOf(prefs.getString("lastMapApp", null)) }
     val lastMapApp = remember(lastPkg) { lastPkg?.let { p -> mapApps(act, vm).firstOrNull { it.pkg == p } } }
     // Mapy.com is a whole site, so it is (re)loaded centred on you once a fix arrives.
-    var mapyCentred by remember { mutableStateOf(false) }
+    var siteCentred by remember { mutableStateOf(false) }
 
     val web = remember {
         val loader = WebViewAssetLoader.Builder().addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(act)).build()
@@ -126,7 +138,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val h = r.url.host ?: return false
-                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h == "appassets.androidplatform.net") return false
+                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h.endsWith("windy.com") || h == "appassets.androidplatform.net") return false
                     act.tryStart(Intent(Intent.ACTION_VIEW, r.url)); return true
                 }
             }
@@ -143,17 +155,20 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) v.parent?.requestDisallowInterceptTouchEvent(true)
                 false
             }
-            loadUrl(source.mapy?.let { mapyUrl(it, null) } ?: "$LEAFLET?layer=${source.layer}")
+            loadUrl(source.site?.invoke(null) ?: leafletUrl(source))
         }
     }
     fun show(s: MapSource) {
         source = s; prefs.edit().putString("mapSource", s.id).apply(); following = true
-        if (s.mapy != null) { web.loadUrl(mapyUrl(s.mapy, here)); mapyCentred = here != null }
-        else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}')", null)
-        else web.loadUrl("$LEAFLET?layer=${s.layer}")
+        if (s.site != null) { web.loadUrl(s.site.invoke(here)); siteCentred = here != null }
+        else if (web.url?.startsWith(LEAFLET) == true) web.evaluateJavascript("setLayer('${s.layer}'); setRadar(${s.radar})", null)
+        else web.loadUrl(leafletUrl(s))
+    }
+    LaunchedEffect(vm.mapRequest) {
+        vm.mapRequest?.let { id -> MAP_SOURCES.firstOrNull { it.id == id }?.let { show(it) }; vm.mapRequest = null }
     }
     LaunchedEffect(here != null) {
-        if (here != null && source.mapy != null && !mapyCentred) { web.loadUrl(mapyUrl(source.mapy!!, here)); mapyCentred = true }
+        if (here != null && source.site != null && !siteCentred) { web.loadUrl(source.site!!.invoke(here)); siteCentred = true }
     }
     DisposableEffect(Unit) { onDispose { web.destroy() } }
 
@@ -207,7 +222,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             // Solstice and lunar alignments, as on the Spheres weather page (Dune's own maps only).
             MapAction(if (align) "☀ on" else "☀ lines") {
                 align = !align; prefs.edit().putBoolean("mapAlign", align).apply()
-                if (source.mapy != null) show(MAP_SOURCES.first { it.id == "dark" }.takeIf { align } ?: source)
+                if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" }.takeIf { align } ?: source)
                 else web.evaluateJavascript("setAlign($align)", null)
             }
         }
@@ -224,7 +239,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         }
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (here != null) {
-                if (source.mapy != null) MapAction("centre") { web.loadUrl(mapyUrl(source.mapy!!, here)) }
+                if (source.site != null) MapAction("centre") { web.loadUrl(source.site!!.invoke(here)) }
                 else if (!following) MapAction("centre") { web.evaluateJavascript("centre()", null); following = true }
                 MapAction("share") {
                     val l = here!!
@@ -282,6 +297,10 @@ fun WeatherPage(vm: LauncherVM, gestures: androidx.compose.ui.input.nestedscroll
             Row(verticalAlignment = Alignment.CenterVertically) {
                 vm.weatherApp?.let { w -> Chip("Open Weawow") { vm.launch(w) } }
                 Chip("+ add a Weawow widget") { vm.addWeatherPageWidget() }
+            }
+            Row {
+                Chip("🌧 Rain radar") { vm.mapRequest = "radar"; vm.jumpTo = 5 }
+                Chip("Windy") { vm.mapRequest = "windy"; vm.jumpTo = 5 }
             }
             if (placed.isEmpty()) Note("Add one or more Weawow widgets – the large forecast and radar ones work well here. " +
                 "If Weawow isn't installed, any app's widgets are offered instead.")
