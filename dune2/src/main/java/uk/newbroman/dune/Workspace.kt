@@ -226,7 +226,7 @@ fun AiSettings(vm: LauncherVM) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Brain.PROVIDERS.forEach { pr ->
             Text(pr.name, color = if (pr.id == p.id) Sand else Dim, fontSize = 16.sp,
-                modifier = Modifier.combinedClickable { Brain.setProvider(act, pr.id); key = ""; tick++ }.padding(end = 20.dp, top = 8.dp, bottom = 8.dp))
+                modifier = Modifier.combinedClickable { Brain.setProvider(act, pr.id); key = ""; tick++ }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp))
         }
     }
     if (hasKey) {
