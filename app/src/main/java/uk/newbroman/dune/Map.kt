@@ -103,6 +103,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     var source by remember { mutableStateOf(MAP_SOURCES.firstOrNull { it.id == prefs.getString("mapSource", "mapy-basic") } ?: MAP_SOURCES[0]) }
     var picking by remember { mutableStateOf(false) }
     var align by remember { mutableStateOf(prefs.getBoolean("mapAlign", false)) }
+    var lastPkg by remember { mutableStateOf(prefs.getString("lastMapApp", null)) }
+    val lastMapApp = remember(lastPkg) { lastPkg?.let { p -> mapApps(act, vm).firstOrNull { it.pkg == p } } }
     // Mapy.com is a whole site, so it is (re)loaded centred on you once a fix arrives.
     var mapyCentred by remember { mutableStateOf(false) }
 
@@ -219,6 +221,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
             color = Dim, fontSize = 13.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (here != null) {
                 if (source.mapy != null) MapAction("centre") { web.loadUrl(mapyUrl(source.mapy!!, here)) }
                 else if (!following) MapAction("centre") { web.evaluateJavascript("centre()", null); following = true }
@@ -227,17 +231,19 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                     val text = (place?.let { "$it\n" } ?: "") + "https://maps.google.com/?q=${l.latitude},${l.longitude}"
                     act.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text), "Share my location"))
                 }
-                Box {
-                    var apps by remember { mutableStateOf<List<MapApp>?>(null) }
-                    MapAction("open in ▾") { apps = mapApps(act, vm) }
-                    androidx.compose.material3.DropdownMenu(apps != null, onDismissRequest = { apps = null }) {
-                        if (apps?.isEmpty() == true) androidx.compose.material3.DropdownMenuItem(text = { Text("No map apps found") }, onClick = { apps = null })
-                        apps?.forEach { m ->
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(m.label + if (m.geo) "" else "  (opens the app)") },
-                                leadingIcon = { m.icon?.let { androidx.compose.foundation.Image(it, null, Modifier.padding(0.dp).width(28.dp)) } },
-                                onClick = { apps = null; openIn(act, m, here!!, place) })
-                        }
+            }
+            // Map apps on the phone: always here, with the last one used as a one-tap shortcut.
+            lastMapApp?.let { m -> MapAction("↗ " + m.label.take(12)) { openIn(act, m, here, place); prefs.edit().putString("lastMapApp", m.pkg).apply() } }
+            Box {
+                var apps by remember { mutableStateOf<List<MapApp>?>(null) }
+                MapAction("apps ▾") { apps = mapApps(act, vm) }
+                androidx.compose.material3.DropdownMenu(apps != null, onDismissRequest = { apps = null }) {
+                    if (apps?.isEmpty() == true) androidx.compose.material3.DropdownMenuItem(text = { Text("No map apps found") }, onClick = { apps = null })
+                    apps?.forEach { m ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(m.label + if (m.geo) "" else "  (opens the app)") },
+                            leadingIcon = { m.icon?.let { androidx.compose.foundation.Image(it, null, Modifier.padding(0.dp).width(28.dp)) } },
+                            onClick = { apps = null; openIn(act, m, here, place); prefs.edit().putString("lastMapApp", m.pkg).apply(); lastPkg = m.pkg })
                     }
                 }
             }
@@ -319,9 +325,9 @@ fun mapApps(ctx: Context, vm: LauncherVM): List<MapApp> {
     }.sortedWith(compareBy({ !it.geo }, { it.label.lowercase() }))
 }
 
-fun openIn(ctx: Context, m: MapApp, l: Location, place: String?) {
-    val q = "${l.latitude},${l.longitude}" + (place?.let { "(" + Uri.encode(it) + ")" } ?: "")
-    val i = if (m.geo) Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=$q")).setPackage(m.pkg)
+fun openIn(ctx: Context, m: MapApp, l: Location?, place: String?) {
+    val q = l?.let { "${it.latitude},${it.longitude}" + (place?.let { p -> "(" + Uri.encode(p) + ")" } ?: "") }
+    val i = if (m.geo && l != null) Intent(Intent.ACTION_VIEW, Uri.parse("geo:${l.latitude},${l.longitude}?q=$q")).setPackage(m.pkg)
             else ctx.packageManager.getLaunchIntentForPackage(m.pkg)
     if (i != null) ctx.tryStart(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

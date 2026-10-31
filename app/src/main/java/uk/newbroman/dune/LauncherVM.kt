@@ -499,14 +499,17 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         widgetTarget = null
         // While driving, Home returns to the Drive screen.
         screen = if (Drive.active.value && screen != Screen.DRIVE) Screen.DRIVE else Screen.HOME
-        resumeTick++
+        resumeTick++; homeTick++
     }
+    /** Bumped by Home and Back only: the pager returns to the middle page. Coming back from an app
+     *  (onResume) leaves you on the page you left from – e.g. the map after opening a map app. */
+    var homeTick by mutableIntStateOf(0)
 
     /** Which home page is showing: 0 Rozmowa, 1 groups, 2 home, 3 widgets. */
     var homePage by mutableIntStateOf(HOME_PAGE)
 
     /** Back button: never leaves the launcher; from a side page it returns to the middle. */
-    fun back() { if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) resumeTick++ }
+    fun back() { if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) homeTick++ }
 
     fun onResume() {
         resumeTick++

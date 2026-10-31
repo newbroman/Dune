@@ -153,7 +153,7 @@ fun HomeScreen(vm: LauncherVM) {
     val ctx = LocalContext.current
     val s = vm.store
     val listState = rememberLazyListState()
-    LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME) listState.scrollToItem(0) }
+    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME) listState.scrollToItem(0) }
     val gestures = rememberOverscrollGestures(
         up = { vm.screen = Screen.DRAWER },
         down = { Actions.expandNotifications(ctx) },
@@ -168,7 +168,7 @@ fun HomeScreen(vm: LauncherVM) {
     // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox, 5 Map, 6 Weather.
     val pager = rememberPagerState(initialPage = HOME_PAGE) { 7 }
     val scope = rememberCoroutineScope()
-    LaunchedEffect(vm.resumeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
+    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
     LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
     LaunchedEffect(vm.jumpTo) { vm.jumpTo?.let { pager.animateScrollToPage(it); vm.jumpTo = null } }
 
