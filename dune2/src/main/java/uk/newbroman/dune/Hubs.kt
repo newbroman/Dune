@@ -72,11 +72,11 @@ interface Hub {
 }
 
 object Hubs {
-    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, MusicHub, RecordHub, ConnectHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
+    val ALL: List<Hub> = listOf(HomeHub, CommsHub, TasksHub, ClaudeHub, MusicHub, RecordHub, ConnectHub, MapHub, WeatherHub, AppsHub, WidgetsHub, RozmowaHub)
     /** Hubs switched on by default; a new one in this list is added once, after an update. */
-    private val DEFAULT_ON = listOf("home", "comms", "tasks", "music", "record", "connect", "map", "weather")
+    private val DEFAULT_ON = listOf("home", "comms", "tasks", "claude", "music", "record", "connect", "map", "weather")
     /** Hubs added after 2.1 (before this check existed), so phones updating from 2.0/2.1 are offered them. */
-    private val NEW_IN_2_2 = listOf("record", "music", "connect")
+    private val NEW_IN_2_2 = listOf("record", "music", "connect", "claude")
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
     fun enabled(s: Store): List<Hub> {
@@ -119,6 +119,11 @@ fun HubScreen(vm: LauncherVM) {
         vm.media.onTrack = { t, a, p -> PlayHistory.add(ctx, Played(t, a, p, System.currentTimeMillis())) }
         vm.media.start()
         onDispose { vm.media.stop() }
+    }
+    // If the list of hubs changes (an update adds one, or Settings), stay on the hub you were looking at.
+    LaunchedEffect(hubs.joinToString { it.id }) {
+        val i = hubs.indexOfFirst { it.id == vm.currentHub }
+        if (i >= 0 && i != pager.currentPage) pager.scrollToPage(i)
     }
     LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == 0) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
@@ -233,7 +238,7 @@ object HomeHub : Hub {
         val isDefault = remember(vm.resumeTick) { Actions.isDefaultHome(ctx) }
         LazyColumn(Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp), state = list) {
             if (!isDefault) item {
-                Text("Make Dune 2 your home app  →", color = Sand, fontSize = 15.sp,
+                Text("Make Dune your home app  →", color = Sand, fontSize = 15.sp,
                     modifier = Modifier.padding(top = 16.dp).combinedClickable { Actions.homeSettings(ctx) })
             }
             item { ClockBlock(vm) }

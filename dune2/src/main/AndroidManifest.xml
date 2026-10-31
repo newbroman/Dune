@@ -103,7 +103,7 @@
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
-        android:label="Dune 2"
+        android:label="Dune"
         android:supportsRtl="true"
         android:theme="@style/Theme.Dune">
 
@@ -186,7 +186,7 @@
         <service
             android:name=".NotifService"
             android:exported="true"
-            android:label="Dune 2 notifications"
+            android:label="Dune notifications"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
             <intent-filter>
                 <action android:name="android.service.notification.NotificationListenerService" />
