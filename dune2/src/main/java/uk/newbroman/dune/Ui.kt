@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -776,19 +777,55 @@ private fun AppRow(vm: LauncherVM, a: AppEntry) {
 fun SettingsScreen(vm: LauncherVM) {
     val act = LocalContext.current as Activity
     val s = vm.store
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val heads = remember { HashMap<String, Int>() }   // section → its row in the list (filled as the list is built)
+    var query by rememberSaveable { mutableStateOf("") }
+    fun jump(sec: String) {
+        query = ""   // back to the full list, then scroll once it's laid out
+        heads[sec]?.let { i -> scope.launch { kotlinx.coroutines.delay(80); list.scrollToItem(i) } }
+    }
 
-    LazyColumn(Modifier.fillMaxSize().systemBarsPadding().imePadding().padding(horizontal = 24.dp)) {
-        item {
-            Text(
-                "←  Settings", color = Fg, fontSize = 22.sp,
-                modifier = Modifier.combinedClickable { vm.goHome() }.padding(top = 20.dp, bottom = 8.dp)
-            )
+    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+        Text("←  Settings", color = Fg, fontSize = 22.sp,
+            modifier = Modifier.padding(horizontal = 24.dp).combinedClickable { vm.goHome() }.padding(top = 20.dp, bottom = 8.dp))
+        // Search every setting by name.
+        Row(Modifier.padding(horizontal = 24.dp).fillMaxWidth().border(1.dp, Faint, RoundedCornerShape(22.dp)).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            BasicTextField(query, { query = it }, singleLine = true, textStyle = TextStyle(color = Fg, fontSize = 16.sp), cursorBrush = SolidColor(Sand),
+                modifier = Modifier.weight(1f).padding(vertical = 11.dp),
+                decorationBox = { inner -> Box { if (query.isEmpty()) Text("Search settings…", color = Faint, fontSize = 16.sp); inner() } })
+            if (query.isNotEmpty()) Text("✕", color = Dim, fontSize = 15.sp, modifier = Modifier.combinedClickable { query = "" }.padding(8.dp))
         }
+        // Jump to a section.
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 6.dp)) {
+            SETTINGS_INDEX.map { it.second }.distinct().forEach { sec ->
+                Text(sec.substringBefore(" (").substringBefore(" –"), color = Dim, fontSize = 13.sp,
+                    modifier = Modifier.combinedClickable { jump(sec) }.padding(horizontal = 8.dp, vertical = 6.dp))
+            }
+        }
+        if (query.isNotBlank()) {
+            val words = query.trim().lowercase().split(Regex("\\s+"))
+            val hits = SETTINGS_INDEX.filter { (label, sec) -> val t = (label + " " + sec).lowercase(); words.all { it in t } }
+            LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+                if (hits.isEmpty()) item { Note("No setting matches “$query”") }
+                items(hits) { (label, sec) ->
+                    Column(Modifier.fillMaxWidth().combinedClickable { jump(sec) }.padding(vertical = 8.dp)) {
+                        Text(label, color = Fg, fontSize = 16.sp)
+                        Text(sec, color = Dim, fontSize = 12.sp)
+                    }
+                }
+            }
+            return@Column
+        }
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 24.dp), state = list) {
+        val c = Counting(this, heads)
+        with(c) {
 
-        item { Header("Hubs") }
+        section("Hubs")
         item { HubSettings(vm) }
 
-        item { Header("Set up") }
+        section("Set up")
         item { LinkRow("Make Dune the home app") { Actions.homeSettings(act) } }
         item { LinkRow("Notification access") { Actions.notificationAccess(act) } }
         item {
@@ -811,7 +848,7 @@ fun SettingsScreen(vm: LauncherVM) {
             }
         }
 
-        item { Header("Home screen") }
+        section("Home screen")
         item { Toggle("24-hour clock", s.clock24) }
         item { Toggle("Date and time in Polish", s.polishClock) }
         item { Toggle("Ask bar (assistant)", s.showAssistant) }
@@ -849,10 +886,10 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("L14", s.showL14) }
         item { Toggle("Open keyboard with app list", s.autoKeyboard) }
 
-        item { Header("Dune AI") }
+        section("Dune AI")
         item { AiSettings(vm) }
 
-        item { Header("Workspaces (two apps side by side)") }
+        section("Workspaces (two apps side by side)")
         item {
             Note("One per line:  Name | first app | second app. Names can be the start of an app's name. " +
                 "Tap a workspace on the home screen to open both in split screen.")
@@ -867,10 +904,10 @@ fun SettingsScreen(vm: LauncherVM) {
         }
         item { Toggle("Show workspaces on the home screen", s.showWorkspaces) }
 
-        item { Header("Coinbase") }
+        section("Coinbase")
         item { CoinbaseSettings(vm) }
 
-        item { Header("Drive mode") }
+        section("Drive mode")
         item {
             Note("Drive mode opens when your phone connects to a car below, and closes when it disconnects. " +
                 "It reads new messages aloud and lets you reply by voice.")
@@ -883,7 +920,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
-        item { Header("Weather") }
+        section("Weather")
         item {
             if (s.weatherWidget.value.isNotBlank()) {
                 Note("The weather spot shows a widget.")
@@ -895,7 +932,7 @@ fun SettingsScreen(vm: LauncherVM) {
         }
         item { Field("Place (blank = phone location)", s.weatherPlace) }
 
-        item { Header("Termux shortcuts") }
+        section("Termux shortcuts")
         item {
             Note("One-tap: put a script in Termux's ~/.shortcuts, then tap “+” in the Termux row and pick it. " +
                 "A shortcut named L14 (or ssh…) is used by the L14 SSH button. Long-press a ▸ chip to remove it.")
@@ -903,7 +940,7 @@ fun SettingsScreen(vm: LauncherVM) {
             Field("Shortcuts", s.termuxLines, multi = true)
         }
 
-        item { Header("L14") }
+        section("L14")
         item { Field("Address (IP or hostname)", s.l14Host) }
         item { Field("User", s.l14User) }
         item { Field("SSH port", s.l14Port, number = true) }
@@ -919,7 +956,7 @@ fun SettingsScreen(vm: LauncherVM) {
             Field("L14 commands", s.l14Lines, multi = true)
         }
 
-        item { Header("Groups") }
+        section("Groups")
         item {
             Note("Apps are sorted automatically; long-press any app › Move or copy to group to change one. " +
                 "Rules, one group per line:  Name | keywords. First match wins. Keywords match the start of a word in the app's name; " +
@@ -931,12 +968,15 @@ fun SettingsScreen(vm: LauncherVM) {
 
         val hidden = vm.apps.filter { it.key in s.hidden }
         if (hidden.isNotEmpty()) {
-            item { Header("Hidden apps – tap to show") }
+            section("Hidden apps – tap to show")
             items(hidden, key = { "h" + it.key }) { a -> LinkRow(a.label) { s.setHidden(a.key, false) } }
         }
         item {
-            Text("Dune 1.16", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
+            val v = remember { runCatching { act.packageManager.getPackageInfo(act.packageName, 0).versionName }.getOrNull() ?: "" }
+            Text("Dune $v", color = Faint, fontSize = 12.sp, modifier = Modifier.padding(vertical = 32.dp))
         }
+        }
+    }
     }
 }
 
@@ -1369,4 +1409,14 @@ internal fun RozmowaPage(vm: LauncherVM) {
             modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
         )
     }
+}
+
+/** Counts the rows a LazyColumn is given, so Settings can jump to a section by its row number. */
+private class Counting(private val d: androidx.compose.foundation.lazy.LazyListScope, private val heads: MutableMap<String, Int>) :
+    androidx.compose.foundation.lazy.LazyListScope by d {
+    private var n = 0
+    override fun item(key: Any?, contentType: Any?, content: @Composable androidx.compose.foundation.lazy.LazyItemScope.() -> Unit) { n++; d.item(key, contentType, content) }
+    override fun items(count: Int, key: ((Int) -> Any)?, contentType: (Int) -> Any?, itemContent: @Composable androidx.compose.foundation.lazy.LazyItemScope.(Int) -> Unit) { n += count; d.items(count, key, contentType, itemContent) }
+    /** A section heading that the jump row and search can scroll to. */
+    fun section(title: String) { heads[title] = n; item(key = "sec:$title") { Header(title) } }
 }
