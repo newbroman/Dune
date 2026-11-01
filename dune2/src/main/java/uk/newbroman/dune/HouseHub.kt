@@ -52,9 +52,11 @@ object HouseHub : Hub {
         "com.tplink.kasa_android", "com.tuya.smartlife", "com.tuya.smart", "com.ezviz", "com.videogo",
         "com.wizconnected.wiz2", "com.philips.lighting.hue2", "com.govee.home", "com.lifx.lifx", "com.nest.android",
         "com.ringapp", "com.samsung.android.oneconnect", "com.theswitchbot.switchbot", "com.meross.meross",
-        "com.netatmo.netatmo", "com.oceanwing.battery.cam", "com.assaabloy.yale", "uk.co.centrica.hive.v6")
+        "com.netatmo.netatmo", "com.oceanwing.battery.cam", "com.assaabloy.yale", "uk.co.centrica.hive.v6",
+        "com.viessmann.vicare", "com.solaredge.homeowner")
     private val WORDS = listOf("google home", "alexa", "tado", "tapo", "kasa", "smart life", "tuya", "ezviz", "wiz ", "philips hue",
-        "govee", "lifx", "nest", "smartthings", "switchbot", "meross", "netatmo", "eufy", "thermostat", "doorbell")
+        "govee", "lifx", "nest", "smartthings", "switchbot", "meross", "netatmo", "eufy", "thermostat", "doorbell",
+        "brmesh", "br mesh", "linktap", "link tap", "vicare", "viessmann", "sunsynk", "jk bms", "jkbms", "jk-bms", "solaredge", "solar edge")
     private const val EZVIZ = "com.ezviz"
 
     private fun deg(d: Double?) = d?.let { String.format(Locale.UK, "%.1f°", it) } ?: "–"
