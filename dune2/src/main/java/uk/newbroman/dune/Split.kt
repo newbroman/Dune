@@ -99,7 +99,7 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
     fun split(from: Context, a: Intent, b: Intent) {
         main.removeCallbacksAndMessages(null)
         val me = ++run
-        trace.setLength(0)
+        trace.setLength(0); skip = emptySet()
         val la = label(a.component?.packageName ?: a.`package` ?: ""); val lb = label(b.component?.packageName ?: b.`package` ?: "")
         note("Workspace: $la + $lb · Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
         val first = runCatching { from.startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -113,7 +113,24 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
                 main.postDelayed({ startSecond(from, b) }, 1100); return@postDelayed
             }
             note("direct split: refused – using Recent apps")
+            // Only the Recent apps screen counts – not the app itself, the status bar or the navigation bar.
+            skip = setOf(a.component?.packageName ?: "", "com.android.systemui", packageName)
             performGlobalAction(GLOBAL_ACTION_RECENTS)
+            waitFor(me, "Recent apps", { root -> root.takeIf { recentsWindow(it) } }, quick = true, onMiss = {
+                // Android ignored the request: press the navigation bar's Overview button instead.
+                val btn = allRoots().firstNotNullOfOrNull { r -> find(r) { n -> (n.viewIdResourceName ?: "").endsWith("recent_apps") || n.contentDescription?.toString().equals("Overview", true) } }
+                note(if (btn != null) "pressing Overview" else "no Overview button either")
+                btn?.let { click(it) }
+                waitFor(me, "Recent apps (after Overview)", { root -> root.takeIf { recentsWindow(it) } }) { pickFirst(me, from, la, lb, b) }
+            }) { pickFirst(me, from, la, lb, b) }
+        }, 1300)
+    }
+
+    private var skip: Set<String> = emptySet()
+    private fun recentsWindow(r: android.view.accessibility.AccessibilityNodeInfo) = (r.packageName?.toString() ?: "") !in skip
+
+    private fun pickFirst(me: Int, from: Context, la: String, lb: String, b: Intent) {
+            note("Recent apps: " + roots().joinToString { it.packageName ?: "?" })
             // 1. the first app's icon on its card
             waitFor(me, "the $la icon", { root -> findApp(root, la, preferIcon = true) }) { icon ->
                 click(icon)
@@ -127,7 +144,6 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
                     }) { card -> click(card); note("done") }
                 }
             }
-        }, 1300)
     }
 
     private fun startSecond(from: Context, b: Intent) {
@@ -137,21 +153,23 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
 
     /** Looks for something on screen every quarter second for up to 3 s, then gives up (with a log). */
     private fun waitFor(me: Int, what: String, find: (android.view.accessibility.AccessibilityNodeInfo) -> android.view.accessibility.AccessibilityNodeInfo?,
-                        onMiss: (() -> Unit)? = null, then: (android.view.accessibility.AccessibilityNodeInfo) -> Unit) {
+                        quick: Boolean = false, onMiss: (() -> Unit)? = null, then: (android.view.accessibility.AccessibilityNodeInfo) -> Unit) {
         var tries = 0
         val step = object : Runnable { override fun run() {
             if (me != run) return
             val hit = roots().firstNotNullOfOrNull { find(it) }
             if (hit != null) { note("found $what"); main.postDelayed({ if (me == run) then(hit) }, 350); return }
-            if (++tries < 12) { main.postDelayed(this, 250); return }
-            note("NOT found: $what"); dump()
+            if (++tries < (if (quick) 6 else 12)) { main.postDelayed(this, 250); return }
+            note("NOT found: $what"); if (!quick) dump()
             if (onMiss != null) onMiss() else toast("Split screen: couldn't find $what (log in Settings › Workspaces)")
         } }
         main.postDelayed(step, 400)
     }
 
-    private fun roots(): List<android.view.accessibility.AccessibilityNodeInfo> =
+    private fun allRoots(): List<android.view.accessibility.AccessibilityNodeInfo> =
         (runCatching { windows.mapNotNull { it.root } }.getOrDefault(emptyList()) + listOfNotNull(rootInActiveWindow)).distinct()
+    /** The windows worth searching: everything except the first app, the system bars and Dune's own. */
+    private fun roots() = allRoots().filter { (it.packageName?.toString() ?: "") !in skip }
 
     private fun walk(n: android.view.accessibility.AccessibilityNodeInfo?, depth: Int = 0, out: MutableList<android.view.accessibility.AccessibilityNodeInfo> = ArrayList()): List<android.view.accessibility.AccessibilityNodeInfo> {
         if (n == null || depth > 40 || out.size > 3000) return out
@@ -189,9 +207,9 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
     private fun note(s: String) { trace.appendLine(s); save() }
     /** What was on screen when a step failed: text, descriptions and view ids only. */
     private fun dump() {
-        roots().forEachIndexed { wi, r ->
+        allRoots().filter { (it.packageName?.toString() ?: "") != "com.android.systemui" || it.childCount < 8 }.forEachIndexed { wi, r ->
             trace.appendLine("— window $wi (${r.packageName})")
-            walk(r).filter { it.text != null || it.contentDescription != null || it.viewIdResourceName != null }.take(120).forEach { n ->
+            walk(r).filter { it.text != null || it.contentDescription != null || it.viewIdResourceName != null }.take(200).forEach { n ->
                 trace.appendLine("  " + listOfNotNull(n.viewIdResourceName?.substringAfter(":id/")?.let { "#$it" },
                     n.text?.let { "\"${it.toString().take(40)}\"" }, n.contentDescription?.let { "[${it.toString().take(40)}]" },
                     if (n.isClickable) "clickable" else null).joinToString(" "))
