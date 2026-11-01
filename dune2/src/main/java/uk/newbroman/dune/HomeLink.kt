@@ -166,9 +166,157 @@ object Klap {
     }
 }
 
-/** A plug or bulb on your Wi-Fi. kind: "tapo", "kasa" (KLAP) or "kasa-old" (port 9999). */
+/**
+ * A plug or light. kind: "tapo", "kasa" (KLAP), "kasa-old" (port 9999), "wiz" (model holds its MAC)
+ * or "tuya" (ip is "tuya:<device id>"; reached through Tuya's cloud). [level] is brightness in %.
+ */
 data class Plug(val ip: String, val name: String, val model: String, val kind: String, val bulb: Boolean = false,
-                val on: Boolean? = null, val watts: Double? = null, val error: String? = null)
+                val on: Boolean? = null, val watts: Double? = null, val error: String? = null, val level: Int? = null)
+
+// ======================================================================= WiZ lights: plain JSON over UDP, no account
+
+object Wiz {
+    const val PORT = 38899
+    /** Sends one message to a light and waits for its answer. */
+    fun ask(ip: String, json: String, timeout: Int = 1500): JSONObject {
+        java.net.DatagramSocket().use { s ->
+            s.soTimeout = timeout
+            val out = json.toByteArray(); val to = java.net.InetAddress.getByName(ip)
+            val buf = ByteArray(2048)
+            repeat(3) { attempt ->   // UDP can drop a packet: try a few times
+                s.send(java.net.DatagramPacket(out, out.size, to, PORT))
+                try {
+                    val p = java.net.DatagramPacket(buf, buf.size); s.receive(p)
+                    return JSONObject(String(p.data, 0, p.length))
+                } catch (e: java.net.SocketTimeoutException) { if (attempt == 2) throw IllegalStateException("not answering") }
+            }
+            throw IllegalStateException("not answering")
+        }
+    }
+    /** Asks every WiZ light on the network to say where it is; returns ip → its state. */
+    fun discover(myIp: String, prefix: Int, seconds: Int = 3): Map<String, JSONObject> {
+        val found = LinkedHashMap<String, JSONObject>()
+        java.net.DatagramSocket().use { s ->
+            s.broadcast = true; s.soTimeout = 400
+            val msg = """{"method":"getPilot","params":{}}""".toByteArray()
+            val p = myIp.split('.').map { it.toInt() }
+            val n = (p[0] shl 24) or (p[1] shl 16) or (p[2] shl 8) or p[3]
+            val mask = if (prefix <= 0) 0 else (-1 shl (32 - prefix.coerceIn(8, 30)))
+            val bc = n or mask.inv()
+            val targets = listOf("${bc ushr 24 and 255}.${bc ushr 16 and 255}.${bc ushr 8 and 255}.${bc and 255}", "255.255.255.255").distinct()
+            val end = System.currentTimeMillis() + seconds * 1000L; var next = 0L
+            val buf = ByteArray(2048)
+            while (System.currentTimeMillis() < end) {
+                if (System.currentTimeMillis() >= next) {
+                    targets.forEach { t -> runCatching { s.send(java.net.DatagramPacket(msg, msg.size, java.net.InetAddress.getByName(t), PORT)) } }
+                    next = System.currentTimeMillis() + 1000
+                }
+                try {
+                    val r = java.net.DatagramPacket(buf, buf.size); s.receive(r)
+                    runCatching { JSONObject(String(r.data, 0, r.length)) }.getOrNull()?.optJSONObject("result")?.let { found[r.address.hostAddress ?: ""] = it }
+                } catch (e: java.net.SocketTimeoutException) { }
+            }
+        }
+        return found.filterKeys { it.isNotBlank() }
+    }
+}
+
+// ======================================================================= Tuya / Smart Life, through Tuya's cloud
+
+/**
+ * Tuya's Cloud API, using your own (free) project on platform.tuya.com linked to your Smart Life
+ * app. Requests are signed with the project's Access Secret (HMAC-SHA256), as tinytuya does.
+ */
+object Tuya {
+    val REGIONS = listOf("eu" to "Central Europe", "we" to "Western Europe", "us" to "Western America", "ue" to "Eastern America", "cn" to "China", "in" to "India")
+    fun host(region: String) = when (region) {
+        "us" -> "openapi.tuyaus.com"; "ue" -> "openapi-ueaz.tuyaus.com"; "eu" -> "openapi.tuyaeu.com"
+        "we" -> "openapi-weaz.tuyaeu.com"; "in" -> "openapi.tuyain.com"; else -> "openapi.tuyacn.com"
+    }
+    data class Keys(val id: String, val secret: String, val region: String)
+    fun keys(ctx: Context): Keys? {
+        val id = Secure.get(ctx, "tuya_id") ?: return null; val s = Secure.get(ctx, "tuya_secret") ?: return null
+        return Keys(id, s, ctx.getSharedPreferences("dune", 0).getString("tuyaRegion", "eu")!!)
+    }
+    fun setKeys(ctx: Context, id: String?, secret: String?, region: String) {
+        Secure.put(ctx, "tuya_id", id?.trim()); Secure.put(ctx, "tuya_secret", secret?.trim())
+        ctx.getSharedPreferences("dune", 0).edit().putString("tuyaRegion", region).apply(); token = null
+    }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02x".format(it) }
+    /** The request signature: HMAC-SHA256 over id, token, time and the request itself, in capitals. */
+    fun sign(id: String, secret: String, token: String, t: Long, method: String, pathAndQuery: String, body: String): String {
+        val toSign = method + "\n" + hex(MessageDigest.getInstance("SHA-256").digest(body.toByteArray())) + "\n\n" + pathAndQuery
+        val mac = javax.crypto.Mac.getInstance("HmacSHA256").apply { init(SecretKeySpec(secret.toByteArray(), "HmacSHA256")) }
+        return hex(mac.doFinal((id + token + t + toSign).toByteArray())).uppercase()
+    }
+
+    @Volatile private var token: Pair<String, Long>? = null
+    private fun raw(k: Keys, method: String, pathAndQuery: String, body: String = "", tok: String = ""): JSONObject {
+        val t = System.currentTimeMillis()
+        val c = URL("https://" + host(k.region) + pathAndQuery).openConnection() as HttpURLConnection
+        c.requestMethod = method; c.connectTimeout = 12_000; c.readTimeout = 15_000
+        c.setRequestProperty("client_id", k.id); c.setRequestProperty("t", t.toString()); c.setRequestProperty("sign_method", "HMAC-SHA256")
+        c.setRequestProperty("sign", sign(k.id, k.secret, tok, t, method, pathAndQuery, body))
+        if (tok.isNotEmpty()) c.setRequestProperty("access_token", tok)
+        if (body.isNotEmpty()) { c.doOutput = true; c.setRequestProperty("Content-Type", "application/json"); c.outputStream.use { it.write(body.toByteArray()) } }
+        val code = c.responseCode
+        val o = JSONObject((if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes().decodeToString() } ?: "{}")
+        if (!o.optBoolean("success", false)) throw IllegalStateException("Tuya: " + o.optString("msg", "error $code").let { m ->
+            when (o.optInt("code")) { 1004 -> "wrong Access Secret"; 1106 -> "no permission – is the app account linked to the project?"; 28841105 -> "the project's API trial has ended – renew it on platform.tuya.com"; else -> m } })
+        return o
+    }
+    @Synchronized private fun tok(k: Keys): String {
+        token?.takeIf { it.second > System.currentTimeMillis() }?.let { return it.first }
+        val r = raw(k, "GET", "/v1.0/token?grant_type=1").getJSONObject("result")
+        token = r.getString("access_token") to System.currentTimeMillis() + (r.optLong("expire_time", 3600) - 60) * 1000
+        return token!!.first
+    }
+    private fun call(ctx: Context, method: String, path: String, body: String = ""): JSONObject {
+        val k = keys(ctx) ?: throw IllegalStateException("Add your Tuya project keys first")
+        return try { raw(k, method, path, body, tok(k)) } catch (e: IllegalStateException) {
+            if (e.message?.contains("token", true) == true) { token = null; raw(k, method, path, body, tok(k)) } else throw e
+        }
+    }
+
+    /** Every device on the Smart Life account(s) linked to your project, with its current state. */
+    fun devices(ctx: Context): List<Plug> {
+        val out = ArrayList<Plug>(); var key: String? = null
+        do {
+            val r = call(ctx, "GET", "/v1.0/iot-01/associated-users/devices?size=50" + (key?.let { "&last_row_key=$it" } ?: "")).getJSONObject("result")
+            val a = r.optJSONArray("devices") ?: JSONArray()
+            for (i in 0 until a.length()) out += plug(a.getJSONObject(i))
+            key = r.optString("last_row_key").takeIf { r.optBoolean("has_more") && it.isNotBlank() }
+        } while (key != null)
+        return out
+    }
+    private val SWITCH = listOf("switch_led", "switch_1", "switch", "switch_on")
+    private fun plug(d: JSONObject): Plug {
+        val st = d.optJSONArray("status") ?: JSONArray()
+        val m = (0 until st.length()).map { st.getJSONObject(it) }.associate { it.getString("code") to it.opt("value") }
+        val on = SWITCH.firstNotNullOfOrNull { m[it] as? Boolean }
+        val level = (m["bright_value_v2"] as? Number)?.let { ((it.toInt() - 10) * 100 / 990).coerceIn(1, 100) }
+            ?: (m["bright_value"] as? Number)?.let { ((it.toInt() - 25) * 100 / 230).coerceIn(1, 100) }
+        val cat = d.optString("category")
+        return Plug("tuya:" + d.getString("id"), d.optString("name", "Tuya device"), cat, "tuya", bulb = cat in setOf("dj", "dd", "fwd", "xdd", "dc"),
+            on = on, level = level, error = if (!d.optBoolean("online", true)) "offline" else if (on == null) "can't be switched from here" else null,
+            watts = (m["cur_power"] as? Number)?.toDouble()?.div(10))
+    }
+    fun read(ctx: Context, p: Plug): Plug {
+        val id = p.ip.removePrefix("tuya:")
+        val a = call(ctx, "GET", "/v1.0/iot-03/devices/$id/status").getJSONArray("result")
+        return plug(JSONObject().put("id", id).put("name", p.name).put("category", p.model).put("online", true).put("status", a))
+    }
+    fun send(ctx: Context, p: Plug, code: String, value: Any) {
+        call(ctx, "POST", "/v1.0/iot-03/devices/${p.ip.removePrefix("tuya:")}/commands",
+            JSONObject().put("commands", JSONArray().put(JSONObject().put("code", code).put("value", value))).toString())
+    }
+    fun switch(ctx: Context, p: Plug, on: Boolean) {
+        val codes = call(ctx, "GET", "/v1.0/iot-03/devices/${p.ip.removePrefix("tuya:")}/status").getJSONArray("result")
+            .let { a -> (0 until a.length()).map { a.getJSONObject(it).getString("code") } }
+        send(ctx, p, SWITCH.firstOrNull { it in codes } ?: throw IllegalStateException("no on/off switch"), on)
+    }
+}
 
 object Plugs {
     private val sessions = HashMap<String, Klap.Session>()
@@ -216,6 +364,9 @@ object Plugs {
     /** What a device is and whether it's on. */
     fun read(ctx: Context, p: Plug): Plug = runCatching {
         when (p.kind) {
+            "wiz" -> Wiz.ask(p.ip, """{"method":"getPilot","params":{}}""").getJSONObject("result").let { r ->
+                p.copy(on = r.optBoolean("state"), level = r.optInt("dimming", -1).takeIf { it > 0 }, bulb = true, error = null) }
+            "tuya" -> Tuya.read(ctx, p)
             "kasa-old" -> Klap.legacy(p.ip, """{"system":{"get_sysinfo":{}}}""").getJSONObject("system").getJSONObject("get_sysinfo").let { i ->
                 p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), bulb = isBulb(i),
                     on = i.optInt("relay_state", i.optJSONObject("light_state")?.optInt("on_off") ?: 0) == 1, error = null) }
@@ -225,7 +376,8 @@ object Plugs {
                     val watts = if (r.optString("model").startsWith("P11")) runCatching {
                         s.send("""{"method":"get_energy_usage"}""").getJSONObject("result").optDouble("current_power") / 1000.0 }.getOrNull() else null
                     p.copy(name = b64(r.optString("nickname")).ifBlank { p.name }, model = r.optString("model", p.model), kind = "tapo",
-                        bulb = r.optString("type").contains("BULB"), on = r.optBoolean("device_on"), watts = watts, error = null)
+                        bulb = r.optString("type").contains("BULB"), on = r.optBoolean("device_on"), watts = watts, error = null,
+                        level = if (r.has("brightness")) r.optInt("brightness") else null)
                 } else {
                     val i = s.send("""{"system":{"get_sysinfo":{}}}""").getJSONObject("system").getJSONObject("get_sysinfo")
                     p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), kind = "kasa", bulb = isBulb(i),
@@ -238,6 +390,8 @@ object Plugs {
     fun set(ctx: Context, p: Plug, on: Boolean): Plug {
         runCatching {
             when (p.kind) {
+                "wiz" -> Wiz.ask(p.ip, """{"method":"setPilot","params":{"state":$on}}""")
+                "tuya" -> Tuya.switch(ctx, p, on)
                 "kasa-old" -> Klap.legacy(p.ip, if (p.bulb) """{"smartlife.iot.smartbulb.lightingservice":{"transition_light_state":{"on_off":${if (on) 1 else 0}}}}"""
                     else """{"system":{"set_relay_state":{"state":${if (on) 1 else 0}}}}""")
                 else -> withSession(ctx, p.ip) { s ->
@@ -252,16 +406,56 @@ object Plugs {
             prefs(ctx).edit().putString("plugStates", o.put(r.ip, on2).toString()).apply() } }
     }
 
+    /** Brightness, 1–100 %, for lights that have it. */
+    fun setLevel(ctx: Context, p: Plug, pct: Int): Plug {
+        val v = pct.coerceIn(1, 100)
+        runCatching {
+            when (p.kind) {
+                "wiz" -> Wiz.ask(p.ip, """{"method":"setPilot","params":{"state":true,"dimming":${v.coerceAtLeast(10)}}}""")
+                "tapo" -> withSession(ctx, p.ip) { it.send("""{"method":"set_device_info","params":{"device_on":true,"brightness":$v}}""") }
+                "tuya" -> Tuya.send(ctx, p, "bright_value_v2", 10 + v * 990 / 100)
+                else -> throw IllegalStateException("no dimming")
+            }
+        }.onFailure { return p.copy(error = it.message) }
+        return read(ctx, p)
+    }
+    fun rename(ctx: Context, ip: String, name: String) = save(ctx, saved(ctx).map { if (it.ip == ip) it.copy(name = name) else it })
+
     suspend fun readAll(ctx: Context, list: List<Plug>): List<Plug> = withContext(Dispatchers.IO) {
-        coroutineScope { list.map { p -> async { read(ctx, p) } }.awaitAll() }.also { keepStates(ctx, it) }
+        // Tuya devices come back together in one cloud call; the rest are asked one by one on the Wi-Fi.
+        val tuya = if (list.any { it.kind == "tuya" } && Tuya.keys(ctx) != null) runCatching { Tuya.devices(ctx).associateBy { it.ip } }.getOrNull() else null
+        coroutineScope { list.map { p -> async {
+            if (p.kind == "tuya") tuya?.get(p.ip)?.copy(name = p.name) ?: p.copy(error = "Tuya isn't answering") else read(ctx, p)
+        } }.awaitAll() }.also { keepStates(ctx, it) }
     }
 
-    /** Looks across your Wi-Fi for Tapo and Kasa devices (every address, a few seconds). */
+    /** Looks for WiZ lights, Tapo/Kasa devices on your Wi-Fi, and Tuya devices in your Tuya project. */
     suspend fun discover(ctx: Context, progress: (Int, Int) -> Unit): List<Plug> = withContext(Dispatchers.IO) {
         val w = Net.wifi(ctx)
         val me = w.ip ?: throw IllegalStateException("Connect to your home Wi-Fi first")
-        val (u, pw) = account(ctx) ?: throw IllegalStateException("Add your TP-Link account first")
-        val hosts = Lan.hosts(me, w.prefix)
+        val old = saved(ctx)
+        // WiZ: they answer a broadcast. Keep names you've given them (matched by MAC, as their address can change).
+        val wiz = runCatching { Wiz.discover(me, w.prefix) }.getOrDefault(emptyMap()).map { (ip, r) ->
+            val mac = r.optString("mac")
+            val known = old.firstOrNull { it.kind == "wiz" && it.model == mac }
+            Plug(ip, known?.name ?: "WiZ light ${mac.takeLast(4).uppercase()}", mac, "wiz", bulb = true,
+                on = r.optBoolean("state"), level = r.optInt("dimming", -1).takeIf { it > 0 })
+        }
+        val tuya = if (Tuya.keys(ctx) != null) runCatching { Tuya.devices(ctx) }.getOrElse { e -> throw IllegalStateException(e.message) } else emptyList()
+        val acct = account(ctx)
+        val tp = if (acct == null) emptyList() else scanTapo(ctx, me, w.prefix, acct, progress)
+        val found = wiz + tuya + tp
+        // Add what was found to what was already saved – a device that missed this scan stays (it may be asleep).
+        val byIp = old.filterNot { o -> o.kind == "wiz" && wiz.any { it.model == o.model } }.associateBy { it.ip }.toMutableMap()
+        found.forEach { f -> byIp[f.ip] = f.copy(name = old.firstOrNull { it.ip == f.ip && it.kind == "tuya" }?.name ?: f.name) }
+        val missed = byIp.keys - found.map { it.ip }.toSet()
+        val all = byIp.values.map { if (it.ip in missed) it.copy(error = "not found in the last search") else it }.sortedBy { it.name.lowercase() }
+        save(ctx, all); keepStates(ctx, found); all
+    }
+
+    private suspend fun scanTapo(ctx: Context, me: String, prefix: Int, acct: Pair<String, String>, progress: (Int, Int) -> Unit): List<Plug> = coroutineScope {
+        val (u, pw) = acct
+        val hosts = Lan.hosts(me, prefix)
         val gate = Semaphore(48); var done = 0
         val found = coroutineScope {
             hosts.map { h -> async {
@@ -279,12 +473,7 @@ object Plugs {
                 }
             } }.awaitAll().filterNotNull()
         }
-        // Add what was found to what was already saved – a device that missed this scan stays (it may be asleep).
-        val byIp = saved(ctx).associateBy { it.ip }.toMutableMap()
-        found.forEach { f -> byIp[f.ip] = f }
-        val missed = byIp.keys - found.map { it.ip }.toSet()
-        val all = byIp.values.map { if (it.ip in missed) it.copy(error = "not found in the last scan") else it }.sortedBy { it.name.lowercase() }
-        save(ctx, all); keepStates(ctx, found); all
+        found
     }
 }
 

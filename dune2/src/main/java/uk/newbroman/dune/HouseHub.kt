@@ -90,7 +90,7 @@ object HouseHub : Hub {
         var plugs by remember { mutableStateOf(Plugs.saved(act)) }
         var plugMsg by remember { mutableStateOf<String?>(null) }
         var hasAccount by remember { mutableStateOf(Plugs.account(act) != null) }
-        fun loadPlugs() = scope.launch { if (plugs.isNotEmpty() && hasAccount) plugs = Plugs.readAll(act, plugs) }
+        fun loadPlugs() = scope.launch { if (plugs.isNotEmpty()) plugs = Plugs.readAll(act, plugs) }
         // ---- scenes
         var scenes by remember { mutableStateOf(Scenes.all(act)) }
         var saving by remember { mutableStateOf(false) }
@@ -185,35 +185,55 @@ object HouseHub : Hub {
 
             // ---------------- plugs and lights
             item {
-                Section("Plugs and lights · Tapo, Kasa")
-                if (!hasAccount) {
-                    var u by remember { mutableStateOf("") }; var p by remember { mutableStateOf("") }
-                    Note("Dune talks to Tapo and Kasa devices directly over your Wi-Fi. It needs the TP-Link account you use in the Tapo or Kasa app (kept encrypted on this phone; sent only to your own devices).")
-                    OutlinedTextField(u, { u = it }, label = { Text("TP-Link email") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(p, { p = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
-                    LinkRow("Save and find my devices") {
-                        if (u.isBlank() || p.isBlank()) { act.toast("Email and password, please"); return@LinkRow }
-                        Plugs.setAccount(act, u, p); hasAccount = true; tick++
+                Section("Plugs and lights · WiZ, Tapo, Kasa, Tuya")
+                var finding by remember { mutableStateOf<String?>(null) }
+                var setup by remember { mutableStateOf<String?>(null) }   // "tplink" | "tuya"
+                var renaming by remember { mutableStateOf<Plug?>(null) }
+                fun find() = scope.launch {
+                    finding = "Looking for your lights and plugs…"
+                    runCatching { Plugs.discover(act) { d, n -> finding = "Looking across your Wi-Fi… ${d * 100 / n}%" } }
+                        .onSuccess { plugs = it; plugMsg = if (it.isEmpty()) "Nothing found on this Wi-Fi yet" else null }
+                        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; plugMsg = it.message }
+                    finding = null
+                }
+                LaunchedEffect(tick) { if (tick > 0) find() }
+                fun update(r: Plug) { plugs = plugs.map { if (it.ip == r.ip) r.copy(name = it.name) else it } }
+                plugs.forEach { p -> PlugRow(p,
+                    rename = { renaming = p },
+                    forget = { Plugs.forget(act, p.ip); plugs = plugs.filter { it.ip != p.ip }; act.toast("${p.name} removed") },
+                    level = { pct -> scope.launch { update(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Plugs.setLevel(act, p, pct) }) } }
+                ) { on -> scope.launch { update(kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Plugs.set(act, p, on) }) } } }
+                finding?.let { Note(it) } ?: FlowRow {
+                    Chip(if (plugs.isEmpty()) "find my lights and plugs" else "find again") { find() }
+                    Chip(if (hasAccount) "TP-Link account ✓" else "+ Tapo / Kasa") { setup = if (setup == "tplink") null else "tplink" }
+                    Chip(if (Tuya.keys(act) != null) "Tuya ✓" else "+ Tuya / Smart Life") { setup = if (setup == "tuya") null else "tuya" }
+                }
+                plugMsg?.let { Note(it) }
+                if (plugs.isNotEmpty()) Note("Tap a name to rename it; long-press to remove it from this list. WiZ lights need nothing set up – just “find”.")
+                when (setup) {
+                    "tplink" -> if (hasAccount) LinkRow("Forget the TP-Link account") { Plugs.setAccount(act, null, null); hasAccount = false; setup = null } else {
+                        var u by remember { mutableStateOf("") }; var pw by remember { mutableStateOf("") }
+                        Note("Tapo and Kasa devices are reached directly over your Wi-Fi with the TP-Link account you use in their app (kept encrypted on this phone; the password itself is never sent).")
+                        OutlinedTextField(u, { u = it }, label = { Text("TP-Link email") }, singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(pw, { pw = it }, label = { Text("Password") }, singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password), modifier = Modifier.fillMaxWidth())
+                        LinkRow("Save and find") {
+                            if (u.isBlank() || pw.isBlank()) { act.toast("Email and password, please"); return@LinkRow }
+                            Plugs.setAccount(act, u, pw); hasAccount = true; setup = null; tick++
+                        }
                     }
-                } else {
-                    var finding by remember { mutableStateOf<String?>(null) }
-                    fun find() = scope.launch {
-                        finding = "Looking across your Wi-Fi…"
-                        runCatching { Plugs.discover(act) { d, n -> finding = "Looking across your Wi-Fi… ${d * 100 / n}%" } }
-                            .onSuccess { plugs = it; plugMsg = if (it.isEmpty()) "No Tapo or Kasa devices found on this Wi-Fi" else null }
-                            .onFailure { plugMsg = it.message }
-                        finding = null
-                    }
-                    LaunchedEffect(tick) { if (tick > 0 && plugs.isEmpty()) find() }
-                    plugs.forEach { p -> PlugRow(p, forget = { Plugs.forget(act, p.ip); plugs = plugs.filter { it.ip != p.ip }; act.toast("${p.name} removed") }) { on -> scope.launch { val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Plugs.set(act, p, on) }; plugs = plugs.map { if (it.ip == p.ip) r else it } } } }
-                    finding?.let { Note(it) } ?: Row {
-                        Chip(if (plugs.isEmpty()) "find my devices" else "find devices again") { find() }
-                        Chip("change account") { Plugs.setAccount(act, null, null); hasAccount = false }
-                    }
-                    plugMsg?.let { Note(it) }
-                    if (plugs.isNotEmpty()) Note("Long-press a device's name to remove it from this list.")
+                    "tuya" -> TuyaSetup(onDone = { setup = null; tick++ })
+                }
+                renaming?.let { r ->
+                    var n by remember(r.ip) { mutableStateOf(r.name) }
+                    androidx.compose.material3.AlertDialog(onDismissRequest = { renaming = null },
+                        title = { Text("Rename") },
+                        text = { OutlinedTextField(n, { n = it }, singleLine = true) },
+                        confirmButton = { androidx.compose.material3.TextButton({
+                            if (n.isNotBlank()) { Plugs.rename(act, r.ip, n.trim()); plugs = plugs.map { if (it.ip == r.ip) it.copy(name = n.trim()) else it } }
+                            renaming = null }) { Text("Save") } },
+                        dismissButton = { androidx.compose.material3.TextButton({ renaming = null }) { Text("Cancel") } })
                 }
             }
 
@@ -294,15 +314,60 @@ object HouseHub : Hub {
         }
     }
 
-    @Composable private fun PlugRow(p: Plug, forget: () -> Unit, set: (Boolean) -> Unit) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = forget)) {
-                Text((if (p.bulb) "💡 " else "") + p.name, color = Fg, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(p.error?.let { "⚠ $it" } ?: listOfNotNull(p.model.ifBlank { null }, p.watts?.let { String.format(Locale.UK, "%.0f W", it) }).joinToString(" · "),
-                    color = if (p.error != null) Color(0xFFFF8A80) else Dim, fontSize = 12.sp, maxLines = 1)
+    @Composable private fun PlugRow(p: Plug, rename: () -> Unit, forget: () -> Unit, level: (Int) -> Unit, set: (Boolean) -> Unit) {
+        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).combinedClickable(onClick = rename, onLongClick = forget)) {
+                    Text((if (p.bulb) "💡 " else "") + p.name, color = Fg, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(p.error?.let { "⚠ $it" } ?: listOfNotNull(when (p.kind) { "wiz" -> "WiZ"; "tuya" -> "Tuya"; "tapo" -> p.model.ifBlank { "Tapo" }; else -> p.model.ifBlank { "Kasa" } },
+                        p.level?.takeIf { p.on == true }?.let { "$it%" }, p.watts?.let { String.format(Locale.UK, "%.0f W", it) }).joinToString(" · "),
+                        color = if (p.error != null) Color(0xFFFF8A80) else Dim, fontSize = 12.sp, maxLines = 1)
+                }
+                Switch(checked = p.on == true, onCheckedChange = { set(it) }, enabled = p.error == null || p.on != null)
             }
-            Switch(checked = p.on == true, onCheckedChange = { set(it) }, enabled = p.error == null || p.on != null)
+            // Brightness, sent when you let go.
+            if (p.level != null && p.on == true) {
+                var v by remember(p.ip, p.level) { mutableStateOf(p.level.toFloat()) }
+                androidx.compose.material3.Slider(v, { v = it }, valueRange = 1f..100f, onValueChangeFinished = { level(v.toInt()) },
+                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp))
+            }
         }
+    }
+
+    /** Setting up Tuya: the steps on Tuya's website, then the two keys. */
+    @Composable private fun TuyaSetup(onDone: () -> Unit) {
+        val act = LocalContext.current
+        val have = remember { Tuya.keys(act) }
+        var id by remember { mutableStateOf("") }; var secret by remember { mutableStateOf("") }
+        var region by remember { mutableStateOf(have?.region ?: "eu") }
+        var msg by remember { mutableStateOf<String?>(null) }
+        val scope = rememberCoroutineScope()
+        if (have != null) {
+            Note("Tuya project linked (${Tuya.REGIONS.firstOrNull { it.first == have.region }?.second}).")
+            LinkRow("Forget the Tuya keys") { Tuya.setKeys(act, null, null, region); onDone() }
+            return
+        }
+        Note("Tuya devices (Smart Life app) are switched through Tuya's cloud with your own free developer project. One-time setup, about 15 minutes on a computer:")
+        Note("1. Sign up at platform.tuya.com (free).\n" +
+            "2. Cloud › Development › Create Cloud Project: any name, Industry “Smart Home”, Development Method “Smart Home”, Data Center “Central Europe” (UK). Accept the suggested APIs (IoT Core, Authorization).\n" +
+            "3. In the project: Devices › Link App Account › Add App Account – scan the QR code with the Smart Life app (Me › ⊞ top right).\n" +
+            "4. Overview: copy the Access ID and Access Secret into the boxes below.\n" +
+            "The free IoT Core trial must be extended every 6 months (Cloud › Cloud Services › IoT Core › Extend).")
+        LinkRow("Open platform.tuya.com") { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("https://platform.tuya.com/cloud"))) }
+        FlowRow { Tuya.REGIONS.forEach { (k, n) -> Chip((if (k == region) "● " else "") + n) { region = k } } }
+        OutlinedTextField(id, { id = it }, label = { Text("Access ID / Client ID") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(secret, { secret = it }, label = { Text("Access Secret / Client Secret") }, singleLine = true,
+            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        LinkRow("Save and load my Tuya devices") {
+            if (id.isBlank() || secret.isBlank()) { act.toast("Both keys, please"); return@LinkRow }
+            Tuya.setKeys(act, id, secret, region); msg = "Checking…"
+            scope.launch {
+                runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Tuya.devices(act) } }
+                    .onSuccess { msg = null; act.toast("Tuya: ${it.size} devices"); onDone() }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; msg = it.message; Tuya.setKeys(act, null, null, region) }
+            }
+        }
+        msg?.let { Note(it) }
     }
 
     /** Pick what goes in a new scene; each item is saved as it is now. */

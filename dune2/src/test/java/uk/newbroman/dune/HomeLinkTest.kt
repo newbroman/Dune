@@ -33,3 +33,11 @@ class HomeLinkTest {
         assertEquals("""{"system":{"get_sysinfo":{}}}""", String(Klap.unxor(e)))
     }
 }
+
+/** Tuya request signatures, checked against tinytuya's method with the same inputs. */
+class TuyaSignTest {
+    @Test fun tokenRequest() = assertEquals("FE0035154634C25E59D44C315441C3FB3987DE2EAC9B22D33D9B4616AF4C9FFC",
+        Tuya.sign("abc123", "s3cr3t", "", 1700000000000, "GET", "/v1.0/token?grant_type=1", ""))
+    @Test fun commandRequest() = assertEquals("17E1D26BEE9F589B0831A244229BD8F79F642ABF0CA0B82C3FBDF25369F22444",
+        Tuya.sign("abc123", "s3cr3t", "tok9", 1700000000000, "POST", "/v1.0/iot-03/devices/d1/commands", """{"commands":[{"code":"switch_1","value":true}]}"""))
+}
