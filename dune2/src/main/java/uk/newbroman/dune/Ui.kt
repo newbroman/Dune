@@ -858,6 +858,11 @@ fun SettingsScreen(vm: LauncherVM) {
                 "Tap a workspace on the home screen to open both in split screen.")
             Field("Workspaces", s.workspaces, multi = true)
         }
+        item {
+            val on = remember(vm.resumeTick) { SplitService.enabled() }
+            LinkRow(if (on) "✓ Dune split screen is on" else "Turn on “Dune split screen” (needed on most phones)") { SplitService.settings(act) }
+            Note("In Accessibility › Downloaded apps (or Installed services) › Dune split screen. It only presses Android's split-screen button for a workspace and reads nothing on screen. If it's greyed out, allow restricted settings for Dune first (app info › ⋮).")
+        }
         item { Toggle("Show workspaces on the home screen", s.showWorkspaces) }
 
         item { Header("Coinbase") }

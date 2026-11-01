@@ -28,6 +28,12 @@ object Workspaces {
         val a = find(apps, w.first) { it.label }; val b = find(apps, w.second) { it.label }
         if (a == null || b == null) { ctx.toast("Can't find “${if (a == null) w.first else w.second}”"); return }
         val la = launchIntent(ctx, a) ?: return; val lb = launchIntent(ctx, b) ?: return
+        // The reliable way: Android's own split-screen action, which only an accessibility service may use.
+        SplitService.instance?.let { it.split(la, lb); return }
+        if (!ctx.getSharedPreferences("dune", 0).getBoolean("splitAsked", false)) {
+            ctx.getSharedPreferences("dune", 0).edit().putBoolean("splitAsked", true).apply()
+            ctx.toast("For dependable split screen, turn on “Dune split screen” in Accessibility (Settings › Workspaces)")
+        }
         ctx.startActivity(Intent(ctx, SplitActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
             .putExtra("a", la).putExtra("b", lb))
@@ -62,4 +68,37 @@ class SplitActivity : Activity() {
     }
 
     override fun onDestroy() { main.removeCallbacksAndMessages(null); super.onDestroy() }
+}
+
+/**
+ * "Dune split screen": an accessibility service that does one thing – presses Android's own
+ * split-screen button for a workspace. It reads nothing on screen. Opening the first app, asking
+ * the system to split, then opening the second app beside it works on phones where an app
+ * asking for its neighbour on its own doesn't.
+ */
+class SplitService : android.accessibilityservice.AccessibilityService() {
+    companion object { @Volatile var instance: SplitService? = null; private set
+        fun enabled() = instance != null
+        fun settings(ctx: Context) { ctx.tryStart(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+    }
+    private val main = Handler(Looper.getMainLooper())
+
+    override fun onServiceConnected() { instance = this }
+    override fun onUnbind(intent: Intent?): Boolean { instance = null; return super.onUnbind(intent) }
+    override fun onDestroy() { instance = null; main.removeCallbacksAndMessages(null); super.onDestroy() }
+    override fun onAccessibilityEvent(e: android.view.accessibility.AccessibilityEvent?) {}
+    override fun onInterrupt() {}
+
+    fun split(a: Intent, b: Intent) {
+        main.removeCallbacksAndMessages(null)
+        runCatching { startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        main.postDelayed({
+            @Suppress("DEPRECATION")
+            val ok = performGlobalAction(GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN)
+            main.postDelayed({
+                runCatching { startActivity(Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)) }
+                if (!ok) toast("This phone wouldn't split the screen for that app")
+            }, 900)
+        }, 900)
+    }
 }

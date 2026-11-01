@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="split_service_description">Lets Dune open a workspace as two apps side by side by pressing Android\'s own split-screen button. It reads nothing on your screen and does nothing else.</string>
     <string name="sky_wallpaper_description">Tonight\'s sky where you are – stars, planets, the Moon – with the weather over it, turning with real time.</string>
 </resources>
