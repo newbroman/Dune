@@ -112,7 +112,22 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
                 note("direct split: accepted")
                 main.postDelayed({ startSecond(from, b) }, 1100); return@postDelayed
             }
-            note("direct split: refused – using Recent apps")
+            note("direct split: refused")
+            // 2. The simple way (worked for some pairs in 2.18): open the second app "beside" the first.
+            val pa = a.component?.packageName ?: ""; val pb = b.component?.packageName ?: ""
+            runCatching { startActivity(Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)) }
+            main.postDelayed({
+                if (me != run) return@postDelayed
+                val showing = allRoots().mapNotNull { it.packageName?.toString() }.toSet()
+                if (pa in showing && pb in showing) { note("beside: split ✓"); return@postDelayed }
+                note("beside: not split (showing ${showing.filter { it != "com.android.systemui" }}) – using Recent apps")
+                viaRecents(me, from, a, b, la, lb)
+            }, 1600)
+        }, 1300)
+    }
+
+    /** 3. The long way: Recent apps › the first app's card › Split screen › the second app's card. */
+    private fun viaRecents(me: Int, from: Context, a: Intent, b: Intent, la: String, lb: String) {
             // Only the Recent apps screen counts – not the app itself, the status bar or the navigation bar.
             skip = setOf(a.component?.packageName ?: "", "com.android.systemui", packageName)
             performGlobalAction(GLOBAL_ACTION_RECENTS)
@@ -123,27 +138,49 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
                 btn?.let { click(it) }
                 waitFor(me, "Recent apps (after Overview)", { root -> root.takeIf { recentsWindow(it) } }) { pickFirst(me, from, la, lb, b) }
             }) { pickFirst(me, from, la, lb, b) }
-        }, 1300)
     }
 
     private var skip: Set<String> = emptySet()
     private fun recentsWindow(r: android.view.accessibility.AccessibilityNodeInfo) = (r.packageName?.toString() ?: "") !in skip
 
     private fun pickFirst(me: Int, from: Context, la: String, lb: String, b: Intent) {
-            note("Recent apps: " + roots().joinToString { it.packageName ?: "?" })
-            // 1. the first app's icon on its card
-            waitFor(me, "the $la icon", { root -> findApp(root, la, preferIcon = true) }) { icon ->
-                click(icon)
-                // 2. "Split screen" in its menu
-                waitFor(me, "Split screen in the menu", { root -> find(root) { n -> SPLIT_WORDS.matches(n.text?.toString() ?: n.contentDescription?.toString() ?: "") } }) { opt ->
-                    click(opt)
-                    // 3. the second app's card
-                    waitFor(me, "the $lb card", { root -> findApp(root, lb, preferIcon = false) }, onMiss = {
-                        note("$lb not in Recent apps – opening it beside")
-                        startSecond(from, b)
-                    }) { card -> click(card); note("done") }
-                }
+        note("Recent apps: " + roots().joinToString { it.packageName ?: "?" })
+        waitFor(me, "the $la card", { root -> findCard(root, la) }) { card ->
+            note("$la card actions: " + card.actionList.mapNotNull { it.label?.toString() }.joinToString(" | "))
+            // Cards usually offer their menu items (Split screen, App info…) as accessibility actions.
+            val act = card.actionList.firstOrNull { it.label?.toString()?.contains("split", true) == true }
+            if (act != null && card.performAction(act.id)) { note("used “${act.label}”"); pickSecond(me, from, lb, b); return@waitFor }
+            // Otherwise tap the app icon at the top of the card, and choose Split screen from its menu.
+            val r = android.graphics.Rect(); card.getBoundsInScreen(r)
+            tap(r.exactCenterX(), r.top + 28 * resources.displayMetrics.density)
+            waitFor(me, "Split screen in the menu", { root -> find(root) { n -> SPLIT_WORDS.matches(n.text?.toString() ?: n.contentDescription?.toString() ?: "") } }) { opt ->
+                click(opt); pickSecond(me, from, lb, b)
             }
+        }
+    }
+
+    /** The second app's card, scrolling through Recent apps if need be; or open it beside if it isn't there. */
+    private fun pickSecond(me: Int, from: Context, lb: String, b: Intent, scrolls: Int = 0) {
+        waitFor(me, "the $lb card", { root -> findCard(root, lb) }, quick = true, onMiss = {
+            val list = roots().firstNotNullOfOrNull { r -> find(r) { it.isScrollable } }
+            if (list != null && scrolls < 6 && (list.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) ||
+                    list.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD))) {
+                note("scrolling for $lb"); main.postDelayed({ pickSecond(me, from, lb, b, scrolls + 1) }, 500)
+            } else { note("$lb not in Recent apps – opening it beside"); dump(); startSecond(from, b) }
+        }) { card -> click(card); note("done") }
+    }
+
+    /** A task card in Recent apps: the node named after the app, preferring Launcher's "task" views. */
+    private fun findCard(root: android.view.accessibility.AccessibilityNodeInfo, label: String): android.view.accessibility.AccessibilityNodeInfo? {
+        val l = label.lowercase()
+        val hits = walk(root).filter { n -> n.isVisibleToUser && n.contentDescription?.toString()?.lowercase()?.let { it == l || it.startsWith("$l ") || it.startsWith("$l,") } == true }
+        return hits.firstOrNull { (it.viewIdResourceName ?: "").endsWith("/task") } ?: hits.maxByOrNull { area(it) }
+    }
+
+    private fun tap(x: Float, y: Float) {
+        val path = android.graphics.Path().apply { moveTo(x, y) }
+        dispatchGesture(android.accessibilityservice.GestureDescription.Builder()
+            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60)).build(), null, null)
     }
 
     private fun startSecond(from: Context, b: Intent) {
@@ -212,7 +249,8 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
             walk(r).filter { it.text != null || it.contentDescription != null || it.viewIdResourceName != null }.take(200).forEach { n ->
                 trace.appendLine("  " + listOfNotNull(n.viewIdResourceName?.substringAfter(":id/")?.let { "#$it" },
                     n.text?.let { "\"${it.toString().take(40)}\"" }, n.contentDescription?.let { "[${it.toString().take(40)}]" },
-                    if (n.isClickable) "clickable" else null).joinToString(" "))
+                    if (n.isClickable) "clickable" else null,
+                    n.actionList.mapNotNull { it.label?.toString() }.takeIf { it.isNotEmpty() }?.joinToString("|", "{", "}")).joinToString(" "))
             }
         }
         save()
