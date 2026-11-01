@@ -77,7 +77,8 @@ object HouseHub : Hub {
         var linked by remember { mutableStateOf(Tado.linked(act)) }
         fun loadTado(force: Boolean) = scope.launch {
             if (!Tado.linked(act)) return@launch
-            runCatching { Tado.state(act, force) }.onSuccess { tado = it; tadoMsg = null }.onFailure { tadoMsg = it.message; linked = Tado.linked(act) }
+            runCatching { Tado.state(act, force) }.onSuccess { tado = it; tadoMsg = null }
+                .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; tadoMsg = it.message; linked = Tado.linked(act) }
         }
         // ---- plugs
         var plugs by remember { mutableStateOf(Plugs.saved(act)) }
@@ -93,9 +94,14 @@ object HouseHub : Hub {
         // tado sign-in: poll until confirmed on tado's page
         LaunchedEffect(login) {
             val l = login ?: return@LaunchedEffect
+            var wait = l.interval * 1000L; var misses = 0
             while (System.currentTimeMillis() < l.expires) {
-                delay(l.interval * 1000L)
-                val done = runCatching { Tado.pollLogin(act, l) }.getOrElse { tadoMsg = it.message; login = null; return@LaunchedEffect }
+                delay(wait)
+                val done = try { Tado.pollLogin(act, l) }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                    catch (e: Tado.SlowDown) { wait += 5000; false }
+                    catch (e: java.io.IOException) { if (++misses > 5) { tadoMsg = "No connection to tado"; login = null; return@LaunchedEffect }; false }
+                    catch (e: Exception) { tadoMsg = e.message; login = null; return@LaunchedEffect }
                 if (done) { login = null; linked = true; tadoMsg = null; loadTado(true); return@LaunchedEffect }
             }
             login = null; tadoMsg = "The sign-in code ran out – try again"
@@ -152,7 +158,7 @@ object HouseHub : Hub {
                         val t = tado!!
                         t.zones.forEach { z -> ZoneRow(z) { change ->
                             scope.launch {
-                                runCatching { change() }.onFailure { tadoMsg = it.message }
+                                runCatching { change() }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; tadoMsg = it.message }
                                 tado = Tado.cached(act)
                             }
                         } }
@@ -195,12 +201,13 @@ object HouseHub : Hub {
                         finding = null
                     }
                     LaunchedEffect(tick) { if (tick > 0 && plugs.isEmpty()) find() }
-                    plugs.forEach { p -> PlugRow(p) { on -> scope.launch { val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Plugs.set(act, p, on) }; plugs = plugs.map { if (it.ip == p.ip) r else it } } } }
+                    plugs.forEach { p -> PlugRow(p, forget = { Plugs.forget(act, p.ip); plugs = plugs.filter { it.ip != p.ip }; act.toast("${p.name} removed") }) { on -> scope.launch { val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Plugs.set(act, p, on) }; plugs = plugs.map { if (it.ip == p.ip) r else it } } } }
                     finding?.let { Note(it) } ?: Row {
                         Chip(if (plugs.isEmpty()) "find my devices" else "find devices again") { find() }
                         Chip("change account") { Plugs.setAccount(act, null, null); hasAccount = false }
                     }
                     plugMsg?.let { Note(it) }
+                    if (plugs.isNotEmpty()) Note("Long-press a device's name to remove it from this list.")
                 }
             }
 
@@ -228,7 +235,10 @@ object HouseHub : Hub {
         fun nudge(d: Double) {
             val base = pending ?: z.target ?: 20.0
             pending = ((base + d) * 2).let { Math.round(it) / 2.0 }.coerceIn(5.0, 25.0)
-            job?.cancel(); job = scope.launch { delay(1800); val v = pending; if (v != null) run { Tado.set(act, z, v) } }
+            job?.cancel(); job = scope.launch {
+                delay(1800); val v = pending
+                if (v != null) run { try { Tado.set(act, z, v) } finally { pending = null } }
+            }
         }
         Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -247,15 +257,15 @@ object HouseHub : Hub {
             }
             Row {
                 if (z.on) Text("turn off", color = Faint, fontSize = 12.sp, modifier = Modifier.combinedClickable { run { Tado.set(act, z, null) } }.padding(end = 14.dp, top = 2.dp, bottom = 2.dp))
-                else if (z.type == "HOT_WATER") Text("turn on", color = Faint, fontSize = 12.sp, modifier = Modifier.combinedClickable { run { Tado.set(act, z, 55.0) } }.padding(end = 14.dp, top = 2.dp, bottom = 2.dp))
+                else if (z.type == "HOT_WATER") Text("turn on", color = Faint, fontSize = 12.sp, modifier = Modifier.combinedClickable { run { Tado.set(act, z, z.target, on = true) } }.padding(end = 14.dp, top = 2.dp, bottom = 2.dp))
                 if (z.manual) Text("back to schedule", color = Faint, fontSize = 12.sp, modifier = Modifier.combinedClickable { run { Tado.resume(act, z) } }.padding(top = 2.dp, bottom = 2.dp))
             }
         }
     }
 
-    @Composable private fun PlugRow(p: Plug, set: (Boolean) -> Unit) {
+    @Composable private fun PlugRow(p: Plug, forget: () -> Unit, set: (Boolean) -> Unit) {
         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f).combinedClickable(onClick = {}, onLongClick = forget)) {
                 Text((if (p.bulb) "💡 " else "") + p.name, color = Fg, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(p.error?.let { "⚠ $it" } ?: listOfNotNull(p.model.ifBlank { null }, p.watts?.let { String.format(Locale.UK, "%.0f W", it) }).joinToString(" · "),
                     color = if (p.error != null) Color(0xFFFF8A80) else Dim, fontSize = 12.sp, maxLines = 1)
@@ -269,9 +279,10 @@ object HouseHub : Hub {
         var name by remember { mutableStateOf("") }
         val picked = remember { androidx.compose.runtime.mutableStateMapOf<String, Boolean>() }
         val items = buildList {
-            t?.zones?.forEach { z -> add(Triple("room:${z.id}", z.name + ": " + when { z.manual && !z.on -> "off"; z.manual -> deg(z.target); else -> "schedule" },
-                SceneAct("room", z.id.toString(), when { z.manual && !z.on -> "off"; z.manual -> (z.target ?: 20.0).toString(); else -> "auto" }))) }
-            t?.away?.let { a -> add(Triple("away", "tado: " + if (a) "away" else "home", SceneAct("away", "", if (a) "away" else "home"))) }
+            t?.zones?.forEach { z -> add(Triple("room:${z.id}", z.name + ": " + when { z.manual && !z.on -> "off"; z.manual && z.target == null -> "on"; z.manual -> deg(z.target); else -> "schedule" },
+                SceneAct("room", z.id.toString(), when { z.manual && !z.on -> "off"; z.manual && z.target == null -> "on"; z.manual -> z.target.toString(); else -> "auto" }))) }
+            // Only a presence you set by hand (not tado's geofencing) belongs in a scene.
+            if (t?.locked == true) t.away?.let { a -> add(Triple("away", "tado: " + if (a) "away" else "home", SceneAct("away", "", if (a) "away" else "home"))) }
             plugs.filter { it.on != null }.forEach { p -> add(Triple("plug:${p.ip}", p.name + ": " + if (p.on == true) "on" else "off", SceneAct("plug", p.ip, if (p.on == true) "on" else "off"))) }
         }
         Column(Modifier.padding(top = 6.dp)) {

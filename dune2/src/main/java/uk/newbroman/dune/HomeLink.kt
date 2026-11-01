@@ -74,9 +74,21 @@ object Klap {
                 append("\r\n")
             }
             s.getOutputStream().apply { write(head.toByteArray()); write(body); flush() }
-            val all = s.getInputStream().readBytes()
-            val split = (0 until all.size - 3).firstOrNull { all[it] == '\r'.code.toByte() && all[it + 1] == '\n'.code.toByte() && all[it + 2] == '\r'.code.toByte() && all[it + 3] == '\n'.code.toByte() } ?: return Reply(0, emptyMap(), ByteArray(0))
-            val lines = String(all, 0, split).split("\r\n")
+            // Read the headers, then exactly Content-Length bytes (devices may keep the connection open).
+            val inp = s.getInputStream(); val buf = ByteArrayOutputStream()
+            var split = -1
+            while (split < 0) {
+                val b = inp.read(); if (b < 0) break
+                buf.write(b)
+                val a = buf.toByteArray(); val n = a.size
+                if (n >= 4 && a[n - 4] == '\r'.code.toByte() && a[n - 3] == '\n'.code.toByte() && a[n - 2] == '\r'.code.toByte() && a[n - 1] == '\n'.code.toByte()) split = n - 4
+            }
+            if (split < 0) return Reply(0, emptyMap(), ByteArray(0))
+            val headText = String(buf.toByteArray(), 0, split)
+            val len = Regex("(?im)^content-length:\\s*(\\d+)").find(headText)?.groupValues?.get(1)?.toIntOrNull()
+            val rest = if (len != null) ByteArray(len).also { java.io.DataInputStream(inp).readFully(it) } else inp.readBytes()
+            val all = buf.toByteArray() + rest
+            val lines = headText.split("\r\n")
             val code = lines.first().split(' ').getOrNull(1)?.toIntOrNull() ?: 0
             val headers = lines.drop(1).mapNotNull { l -> l.indexOf(':').takeIf { it > 0 }?.let { l.substring(0, it).trim().lowercase() to l.substring(it + 1).trim() } }
                 .groupBy({ it.first }, { it.second })
@@ -99,13 +111,19 @@ object Klap {
     /** A logged-in connection to one device. [smart] is Tapo's protocol; otherwise Kasa's. */
     class Session(val host: String, val smart: Boolean, private val crypto: Crypto, private val cookie: String?, private val made: Long = System.currentTimeMillis()) {
         val fresh get() = System.currentTimeMillis() - made < 20 * 60_000
-        @Synchronized fun send(json: String): JSONObject {
+        @Synchronized fun send(json0: String): JSONObject {
+            // Tapo requests carry a timestamp and a client id, as the official app sends.
+            val json = if (smart) JSONObject(json0).put("request_time_milis", System.currentTimeMillis()).put("terminal_uuid", TERMINAL).toString() else json0
             val (payload, seq) = crypto.encrypt(json)
             val r = post(host, "/app/request?seq=$seq", payload, cookie)
             if (r.code != 200) throw IllegalStateException("device said ${r.code}")
-            return JSONObject(crypto.decrypt(r.body, seq))
+            val o = JSONObject(crypto.decrypt(r.body, seq))
+            if (smart && o.optInt("error_code", 0) != 0) throw DeviceError(o.optInt("error_code"))
+            return o
         }
     }
+    class DeviceError(code: Int) : Exception("device error $code")
+    private val TERMINAL = java.util.Base64.getEncoder().encodeToString(java.util.UUID.randomUUID().toString().toByteArray())
 
     class LoginFailed : Exception("Wrong TP-Link email or password for this device")
 
@@ -117,14 +135,16 @@ object Klap {
         val remote = r1.body.copyOf(16); val server = r1.body.copyOfRange(16, 48)
         val cookie = r1.headers["set-cookie"]?.firstOrNull { it.startsWith("TP_SESSIONID") }?.substringBefore(';')
         // Which account hash does the device recognise? (Also the factory-blank one, for unclaimed devices.)
-        val v2 = authV2(user, pass); val v1 = authV1(user, pass); val v2b = authV2("", ""); val v1b = authV1("", "")
-        val (auth, smart) = when {
-            serverHashV2(local, remote, v2).contentEquals(server) -> v2 to true
-            serverHashV1(local, remote, v1).contentEquals(server) -> v1 to false
-            serverHashV2(local, remote, v2b).contentEquals(server) -> v2b to true
-            serverHashV1(local, remote, v1b).contentEquals(server) -> v1b to false
-            else -> throw LoginFailed()
-        }
+        // Your account first, then the factory accounts unclaimed devices answer to (as python-kasa does), then blank.
+        val accounts = listOf(user to pass, "kasa@tp-link.net" to "kasaSetup", "test@tp-link.net" to "test", "" to "")
+        val (auth, smart) = accounts.firstNotNullOfOrNull { (u, p) ->
+            val v2 = authV2(u, p); val v1 = authV1(u, p)
+            when {
+                serverHashV2(local, remote, v2).contentEquals(server) -> v2 to true
+                serverHashV1(local, remote, v1).contentEquals(server) -> v1 to false
+                else -> null
+            }
+        } ?: throw LoginFailed()
         val h2 = if (smart) clientHashV2(local, remote, auth) else clientHashV1(local, remote, auth)
         val r2 = post(host, "/app/handshake2", h2, cookie)
         if (r2.code != 200) throw LoginFailed()
@@ -163,6 +183,7 @@ object Plugs {
         val a = JSONArray(prefs(ctx).getString("plugs", "[]"))
         (0 until a.length()).map { a.getJSONObject(it) }.map { Plug(it.getString("ip"), it.getString("name"), it.optString("model"), it.getString("kind"), it.optBoolean("bulb")) }
     }.getOrDefault(emptyList())
+    fun forget(ctx: Context, ip: String) = save(ctx, saved(ctx).filter { it.ip != ip })
     fun save(ctx: Context, list: List<Plug>) = prefs(ctx).edit().putString("plugs", JSONArray(list.map {
         JSONObject().put("ip", it.ip).put("name", it.name).put("model", it.model).put("kind", it.kind).put("bulb", it.bulb) }).toString()).apply()
     /** The last states seen, for Home's summary line (no network needed). */
@@ -183,18 +204,21 @@ object Plugs {
     private fun <T> withSession(ctx: Context, ip: String, f: (Klap.Session) -> T): T {
         val s = session(ctx, ip) ?: throw IllegalStateException("not answering")
         return runCatching { f(s) }.getOrElse {
+            if (it is Klap.DeviceError) throw it
             // An old session: log in again once.
             synchronized(sessions) { sessions.remove(ip) }
             f(session(ctx, ip) ?: throw it)
         }
     }
+    private fun isBulb(i: JSONObject) = i.has("light_state") || i.optString("mic_type").contains("BULB", true) || i.optString("type").contains("BULB", true)
     private fun b64(s: String) = runCatching { String(android.util.Base64.decode(s, android.util.Base64.DEFAULT)) }.getOrDefault(s)
 
     /** What a device is and whether it's on. */
     fun read(ctx: Context, p: Plug): Plug = runCatching {
         when (p.kind) {
             "kasa-old" -> Klap.legacy(p.ip, """{"system":{"get_sysinfo":{}}}""").getJSONObject("system").getJSONObject("get_sysinfo").let { i ->
-                p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), on = i.optInt("relay_state", i.optJSONObject("light_state")?.optInt("on_off") ?: 0) == 1, error = null) }
+                p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), bulb = isBulb(i),
+                    on = i.optInt("relay_state", i.optJSONObject("light_state")?.optInt("on_off") ?: 0) == 1, error = null) }
             else -> withSession(ctx, p.ip) { s ->
                 if (s.smart) {
                     val r = s.send("""{"method":"get_device_info"}""").getJSONObject("result")
@@ -204,7 +228,7 @@ object Plugs {
                         bulb = r.optString("type").contains("BULB"), on = r.optBoolean("device_on"), watts = watts, error = null)
                 } else {
                     val i = s.send("""{"system":{"get_sysinfo":{}}}""").getJSONObject("system").getJSONObject("get_sysinfo")
-                    p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), kind = "kasa",
+                    p.copy(name = i.optString("alias", p.name), model = i.optString("model", p.model), kind = "kasa", bulb = isBulb(i),
                         on = i.optInt("relay_state", i.optJSONObject("light_state")?.optInt("on_off") ?: 0) == 1, error = null)
                 }
             }
@@ -223,7 +247,9 @@ object Plugs {
                 }
             }
         }.onFailure { return p.copy(error = it.message ?: "didn't answer") }
-        return read(ctx, p)
+        return read(ctx, p).also { r -> r.on?.let { on2 ->
+            val o = runCatching { JSONObject(prefs(ctx).getString("plugStates", "{}")) }.getOrDefault(JSONObject())
+            prefs(ctx).edit().putString("plugStates", o.put(r.ip, on2).toString()).apply() } }
     }
 
     suspend fun readAll(ctx: Context, list: List<Plug>): List<Plug> = withContext(Dispatchers.IO) {
@@ -243,20 +269,22 @@ object Plugs {
                     val r = runCatching {
                         val open80 = runCatching { Socket().use { it.connect(InetSocketAddress(h, 80), 300) }; true }.getOrDefault(false)
                         val open9999 = runCatching { Socket().use { it.connect(InetSocketAddress(h, 9999), 300) }; true }.getOrDefault(false)
-                        when {
-                            open80 -> runCatching { Klap.connect(h, u, pw) }.fold(
-                                { s -> s?.let { synchronized(sessions) { sessions[h] = it }; read(ctx, Plug(h, h, "", if (it.smart) "tapo" else "kasa")) } },
-                                { e -> if (e is Klap.LoginFailed) Plug(h, "TP-Link device at $h", "", "tapo", error = e.message) else null })
-                            open9999 -> read(ctx, Plug(h, h, "", "kasa-old")).takeIf { it.error == null }
-                            else -> null
-                        }
+                        val viaKlap = if (open80) runCatching { Klap.connect(h, u, pw) }.fold(
+                            { s -> s?.let { synchronized(sessions) { sessions[h] = it }; read(ctx, Plug(h, h, "", if (it.smart) "tapo" else "kasa")) } },
+                            { e -> if (e is Klap.LoginFailed) Plug(h, "TP-Link device at $h", "", "tapo", error = e.message) else null }) else null
+                        viaKlap ?: if (open9999) read(ctx, Plug(h, h, "", "kasa-old")).takeIf { it.error == null } else null
                     }.getOrNull()
                     synchronized(this@coroutineScope) { done++; progress(done, hosts.size) }
                     r
                 }
             } }.awaitAll().filterNotNull()
         }
-        found.sortedBy { it.name.lowercase() }.also { list -> save(ctx, list); keepStates(ctx, list) }
+        // Add what was found to what was already saved – a device that missed this scan stays (it may be asleep).
+        val byIp = saved(ctx).associateBy { it.ip }.toMutableMap()
+        found.forEach { f -> byIp[f.ip] = f }
+        val missed = byIp.keys - found.map { it.ip }.toSet()
+        val all = byIp.values.map { if (it.ip in missed) it.copy(error = "not found in the last scan") else it }.sortedBy { it.name.lowercase() }
+        save(ctx, all); keepStates(ctx, found); all
     }
 }
 
@@ -276,7 +304,7 @@ object Tado {
 
     data class Zone(val id: Int, val name: String, val type: String, val inside: Double?, val humidity: Double?,
                     val target: Double?, val on: Boolean, val manual: Boolean, val heatingPct: Int?)
-    data class State(val home: String, val zones: List<Zone>, val away: Boolean?, val at: Long, val callsLeft: Int?)
+    data class State(val home: String, val zones: List<Zone>, val away: Boolean?, val at: Long, val callsLeft: Int?, val locked: Boolean = false)
     data class Login(val userCode: String, val url: String, val device: String, val interval: Int, val expires: Long)
 
     fun linked(ctx: Context) = Secure.get(ctx, "tado_refresh") != null
@@ -300,10 +328,11 @@ object Tado {
             o.optInt("interval", 5), System.currentTimeMillis() + o.optInt("expires_in", 300) * 1000L)
     }
     /** Step 2: true once you've confirmed (call every [Login.interval] seconds); false while waiting. */
+    class SlowDown : Exception()
     suspend fun pollLogin(ctx: Context, l: Login): Boolean = withContext(Dispatchers.IO) {
         val (code, o) = form("$AUTH/token", mapOf("client_id" to CLIENT, "device_code" to l.device, "grant_type" to "urn:ietf:params:oauth:grant-type:device_code"))
         if (code in 200..299) { keep(ctx, o); true }
-        else when (o.optString("error")) { "authorization_pending", "slow_down" -> false; else -> throw IllegalStateException(o.optString("error_description", "tado sign-in failed")) }
+        else when (o.optString("error")) { "authorization_pending" -> false; "slow_down" -> throw SlowDown(); else -> throw IllegalStateException(o.optString("error_description", "tado sign-in failed")) }
     }
 
     @Volatile private var access: Pair<String, Long>? = null
@@ -316,14 +345,17 @@ object Tado {
         val r = Secure.get(ctx, "tado_refresh") ?: throw IllegalStateException("Sign in to tado first")
         val (code, o) = form("$AUTH/token", mapOf("client_id" to CLIENT, "grant_type" to "refresh_token", "refresh_token" to r))
         if (code !in 200..299) {
-            if (code == 400 || code == 401) Secure.put(ctx, "tado_refresh", null)
-            throw IllegalStateException("tado sign-in has expired – sign in again")
+            if (code == 400 || code == 401) { Secure.put(ctx, "tado_refresh", null); throw IllegalStateException("tado sign-in has expired – sign in again") }
+            throw IllegalStateException("tado isn't answering ($code) – try again later")
         }
         keep(ctx, o); return access!!.first
     }
 
     private var callsLeft: Int? = null
-    private fun call(ctx: Context, method: String, url: String, body: JSONObject? = null): String {
+    private class Unauthorised : Exception()
+    private fun call(ctx: Context, method: String, url: String, body: JSONObject? = null): String =
+        try { call1(ctx, method, url, body) } catch (e: Unauthorised) { access = null; call1(ctx, method, url, body) }
+    private fun call1(ctx: Context, method: String, url: String, body: JSONObject? = null): String {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = method; c.connectTimeout = 12_000; c.readTimeout = 15_000
         c.setRequestProperty("Authorization", "Bearer " + token(ctx))
@@ -333,6 +365,7 @@ object Tado {
         c.getHeaderField("ratelimit")?.let { h -> Regex("r=(\\d+)").find(h)?.groupValues?.get(1)?.toIntOrNull()?.let { callsLeft = it } }
         val text = (if (code in 200..299) c.inputStream else c.errorStream)?.use { it.readBytes().decodeToString() } ?: ""
         if (code == 429) throw IllegalStateException("tado's daily limit is used up – try again tomorrow")
+        if (code == 401) throw Unauthorised()
         if (code !in 200..299) throw IllegalStateException("tado said $code")
         return text
     }
@@ -354,11 +387,11 @@ object Tado {
         return State(o.optString("home"), (0 until a.length()).map { a.getJSONObject(it) }.map { z ->
             Zone(z.getInt("id"), z.getString("name"), z.optString("type"), z.optD("inside"), z.optD("humidity"), z.optD("target"),
                 z.optBoolean("on"), z.optBoolean("manual"), z.optInt("pct", -1).takeIf { it >= 0 })
-        }, if (o.has("away")) o.getBoolean("away") else null, o.getLong("at"), o.optInt("left", -1).takeIf { it >= 0 })
+        }, if (o.has("away")) o.getBoolean("away") else null, o.getLong("at"), o.optInt("left", -1).takeIf { it >= 0 }, o.optBoolean("locked"))
     }
     private fun JSONObject.optD(k: String) = if (has(k) && !isNull(k)) getDouble(k) else null
     private fun save(ctx: Context, s: State) {
-        prefs(ctx).edit().putString("tadoState", JSONObject().put("home", s.home).put("at", s.at).put("left", s.callsLeft ?: -1).apply { s.away?.let { put("away", it) } }
+        prefs(ctx).edit().putString("tadoState", JSONObject().put("home", s.home).put("at", s.at).put("left", s.callsLeft ?: -1).put("locked", s.locked).apply { s.away?.let { put("away", it) } }
             .put("zones", JSONArray(s.zones.map { z -> JSONObject().put("id", z.id).put("name", z.name).put("type", z.type).put("inside", z.inside)
                 .put("humidity", z.humidity).put("target", z.target).put("on", z.on).put("manual", z.manual).put("pct", z.heatingPct ?: -1) })).toString()).apply()
     }
@@ -388,21 +421,21 @@ object Tado {
                     s?.optJSONObject("activityDataPoints")?.optJSONObject("heatingPower")?.optD("percentage")?.toInt())
             }
         }
-        val away = runCatching { JSONObject(call(ctx, "GET", "$API/homes/$h/state")).optString("presence") == "AWAY" }.getOrNull()
-        State("", zones, away, System.currentTimeMillis(), callsLeft).also { save(ctx, it) }
+        val st = runCatching { JSONObject(call(ctx, "GET", "$API/homes/$h/state")) }.getOrNull()
+        State("", zones, st?.optString("presence")?.let { it == "AWAY" }, System.currentTimeMillis(), callsLeft, st?.optBoolean("presenceLocked") == true).also { save(ctx, it) }
     }
 
     /** Set a room: a temperature (null = off) until the next scheduled change. */
-    suspend fun set(ctx: Context, z: Zone, celsius: Double?) = withContext(Dispatchers.IO) {
+    suspend fun set(ctx: Context, z: Zone, celsius: Double?, on: Boolean = celsius != null) = withContext(Dispatchers.IO) {
         val (h, x) = home(ctx)
         if (x) call(ctx, "POST", "$HOPS/homes/$h/rooms/${z.id}/manualControl", JSONObject()
-            .put("setting", JSONObject().put("power", if (celsius == null) "OFF" else "ON").apply { celsius?.let { put("temperature", JSONObject().put("value", it)) } })
+            .put("setting", JSONObject().put("power", if (on) "ON" else "OFF").apply { celsius?.let { put("temperature", JSONObject().put("value", it)) } })
             .put("termination", JSONObject().put("type", "NEXT_TIME_BLOCK")))
         else call(ctx, "PUT", "$API/homes/$h/zones/${z.id}/overlay", JSONObject()
-            .put("setting", JSONObject().put("type", z.type.ifBlank { "HEATING" }).put("power", if (celsius == null) "OFF" else "ON")
-                .apply { celsius?.let { put("temperature", JSONObject().put("celsius", it)) } })
+            .put("setting", JSONObject().put("type", z.type.ifBlank { "HEATING" }).put("power", if (on) "ON" else "OFF")
+                .apply { if (on) celsius?.let { put("temperature", JSONObject().put("celsius", it)) } })
             .put("termination", JSONObject().put("typeSkillBasedApp", "NEXT_TIME_BLOCK")))
-        patch(ctx, z.id) { it.copy(target = celsius ?: it.target, on = celsius != null, manual = true) }
+        patch(ctx, z.id) { it.copy(target = celsius ?: it.target, on = on, manual = true) }
     }
     /** Back to the room's schedule. */
     suspend fun resume(ctx: Context, z: Zone) = withContext(Dispatchers.IO) {
@@ -416,9 +449,9 @@ object Tado {
         val (h, _) = home(ctx)
         if (away == null) call(ctx, "DELETE", "$API/homes/$h/presenceLock")
         else call(ctx, "PUT", "$API/homes/$h/presenceLock", JSONObject().put("homePresence", if (away) "AWAY" else "HOME"))
-        cached(ctx)?.let { save(ctx, it.copy(away = away, callsLeft = callsLeft ?: it.callsLeft)) }
+        cached(ctx)?.let { save(ctx, it.copy(away = away ?: it.away, locked = away != null, callsLeft = callsLeft ?: it.callsLeft)) }
     }
-    private fun patch(ctx: Context, id: Int, f: (Zone) -> Zone) {
+    @Synchronized private fun patch(ctx: Context, id: Int, f: (Zone) -> Zone) {
         cached(ctx)?.let { s -> save(ctx, s.copy(zones = s.zones.map { if (it.id == id) f(it) else it }, callsLeft = callsLeft ?: s.callsLeft)) }
     }
 }
@@ -443,19 +476,28 @@ object Scenes {
 
     /** Runs a scene; returns a short report of anything that didn't work. */
     suspend fun run(ctx: Context, s: Scene): String? = withContext(Dispatchers.IO) {
-        val problems = ArrayList<String>()
+        val problems = java.util.concurrent.ConcurrentLinkedQueue<String>()
         val plugs = Plugs.saved(ctx).associateBy { it.ip }
         val rooms = if (s.acts.any { it.kind == "room" }) runCatching { Tado.cached(ctx)?.zones }.getOrNull()?.associateBy { it.id.toString() } else null
         coroutineScope {
-            s.acts.map { a -> async {
+            // Plugs all at once (they're on your Wi-Fi); tado one call after another.
+            val plugJobs = s.acts.filter { it.kind == "plug" }.map { a -> async {
+                runCatching { plugs[a.target]?.let { p -> Plugs.set(ctx, p, a.value == "on").error?.let { problems += "${p.name}: $it" } } }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; problems += (it.message ?: "failed") }
+            } }
+            s.acts.filter { it.kind != "plug" }.forEach { a ->
                 runCatching {
                     when (a.kind) {
-                        "plug" -> plugs[a.target]?.let { p -> Plugs.set(ctx, p, a.value == "on").error?.let { problems += "${p.name}: $it" } }
-                        "room" -> rooms?.get(a.target)?.let { z -> when (a.value) { "auto" -> Tado.resume(ctx, z); "off" -> Tado.set(ctx, z, null); else -> Tado.set(ctx, z, a.value.toDouble()) } }
+                        "room" -> rooms?.get(a.target)?.let { z -> when (a.value) {
+                            "auto" -> if (z.manual) Tado.resume(ctx, z)   // already on its schedule: no call needed
+                            "off" -> Tado.set(ctx, z, null)
+                            "on" -> Tado.set(ctx, z, null, on = true)
+                            else -> Tado.set(ctx, z, a.value.toDouble()) } }
                         "away" -> Tado.presence(ctx, when (a.value) { "away" -> true; "home" -> false; else -> null })
                     }
-                }.onFailure { problems += (it.message ?: "failed") }
-            } }.awaitAll()
+                }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; problems += (it.message ?: "failed") }
+            }
+            plugJobs.awaitAll()
         }
         problems.distinct().takeIf { it.isNotEmpty() }?.joinToString("; ")
     }
