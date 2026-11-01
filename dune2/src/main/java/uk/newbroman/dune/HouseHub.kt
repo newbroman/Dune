@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -47,8 +49,12 @@ import java.util.Locale
 object HouseHub : Hub {
     override val id = "house"; override val title = "House"; override val glyph = "⌂"
     private val APPS = listOf("com.google.android.apps.chromecast.app", "com.amazon.dee.app", "com.tado", "com.tplink.iot",
-        "com.tplink.kasa_android", "com.tuya.smartlife", "com.tuya.smart", "com.ezviz", "com.videogo")
-    private val WORDS = listOf("home", "alexa", "tado", "tapo", "kasa", "smart life", "tuya", "ezviz", "camera", "heating", "thermostat")
+        "com.tplink.kasa_android", "com.tuya.smartlife", "com.tuya.smart", "com.ezviz", "com.videogo",
+        "com.wizconnected.wiz2", "com.philips.lighting.hue2", "com.govee.home", "com.lifx.lifx", "com.nest.android",
+        "com.ringapp", "com.samsung.android.oneconnect", "com.theswitchbot.switchbot", "com.meross.meross",
+        "com.netatmo.netatmo", "com.oceanwing.battery.cam", "com.assaabloy.yale", "uk.co.centrica.hive.v6")
+    private val WORDS = listOf("google home", "alexa", "tado", "tapo", "kasa", "smart life", "tuya", "ezviz", "wiz ", "philips hue",
+        "govee", "lifx", "nest", "smartthings", "switchbot", "meross", "netatmo", "eufy", "thermostat", "doorbell")
     private const val EZVIZ = "com.ezviz"
 
     private fun deg(d: Double?) = d?.let { String.format(Locale.UK, "%.1f°", it) } ?: "–"
@@ -110,7 +116,7 @@ object HouseHub : Hub {
         HubPage("House", gestures, trailing = {
             Text("↻", color = Dim, fontSize = 18.sp, modifier = Modifier.combinedClickable { loadTado(true); loadPlugs() }.padding(8.dp))
         }) {
-            item { AppsRow(vm, id, APPS, WORDS) }
+            item { HomeApps(vm) }
 
             // ---------------- scenes
             item {
@@ -218,9 +224,34 @@ object HouseHub : Hub {
                     val pkg = listOf(EZVIZ, "com.videogo").firstOrNull { p -> vm.apps.any { it.pkg == p } }
                     if (pkg != null) launchPkg(vm, pkg) else act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$EZVIZ")), "EZVIZ isn't installed")
                 }
-                Note("Google Home, Alexa and Smart Life don't let other apps switch their devices – open them from the apps row above. Smart Life / Tuya devices can come to this page next.")
+                Note("Google Home, Alexa, WiZ and the rest open from the buttons at the top.")
             }
         }
+    }
+
+    /** Your smart-home apps as big buttons. Long-press one to take it off; ＋ adds any app. */
+    @Composable private fun HomeApps(vm: LauncherVM) {
+        val ctx = LocalContext.current
+        var edit by remember { mutableIntStateOf(0) }
+        var picking by remember { mutableStateOf(false) }
+        val apps by androidx.compose.runtime.produceState<List<HubApp>>(emptyList(), vm.apps, edit) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { hubApps(ctx, vm, APPS, WORDS, id) }
+        }
+        FlowRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            apps.forEach { a ->
+                Column(Modifier.width(76.dp).combinedClickable(onClick = { launchPkg(vm, a.pkg) },
+                    onLongClick = { HubAppEdits.remove(vm.store, id, a.pkg); edit++; ctx.toast("${a.label} taken off – ＋ to put it back") })
+                    .padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    a.icon?.let { androidx.compose.foundation.Image(it, a.label, Modifier.size(44.dp)) } ?: Text("⌂", color = Dim, fontSize = 30.sp)
+                    Text(a.label, color = Dim, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
+                }
+            }
+            Column(Modifier.width(76.dp).combinedClickable { picking = true }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("＋", color = Dim, fontSize = 30.sp)
+                Text("add app", color = Faint, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+        if (picking) AppPicker(vm, exclude = apps.map { it.pkg }.toSet(), onPick = { HubAppEdits.add(vm.store, id, it); edit++ }, onDismiss = { picking = false })
     }
 
     @Composable private fun Section(t: String) = Text(t.uppercase(), color = Dim, fontSize = 12.sp, letterSpacing = 2.sp,
