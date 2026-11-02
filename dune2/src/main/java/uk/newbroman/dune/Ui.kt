@@ -128,6 +128,7 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.CAMERA -> CameraScreen(vm)
                     Screen.CLOZE -> ClozeFull()
                     Screen.WELLS -> WellsFull(vm)
+                    Screen.SHOP -> ShopScreen(vm)
                 }
             }
             vm.moving?.let { MoveDialog(vm, it) }

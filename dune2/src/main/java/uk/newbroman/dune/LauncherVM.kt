@@ -35,7 +35,7 @@ data class AppEntry(
 const val PORTFOLIO = "https://newbroman.github.io/"
 val PORTFOLIO_APP = WebApp("My GitHub apps", PORTFOLIO, "")
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE, WELLS }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE, WELLS, SHOP }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
@@ -174,6 +174,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
     /** Map files to add as layers (opened with Dune from another app). */
+    /** What the Shop comparison is searching for. */
+    var shopQuery by mutableStateOf("")
     var gisImport by mutableStateOf<List<android.net.Uri>?>(null)
     /** Ask the map page to switch to a map (by id), e.g. the rain radar from the weather page. */
     var mapRequest by mutableStateOf<String?>(null)
@@ -526,6 +528,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         val from = screen
         if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) homeTick++
         if (from == Screen.WELLS) jumpHub = "map"   // the well logger was opened from the map
+        if (from == Screen.SHOP) jumpHub = "shop"
     }
 
     fun onResume() {
