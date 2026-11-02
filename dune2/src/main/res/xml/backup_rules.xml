@@ -4,4 +4,5 @@
     <exclude domain="file" path="inbox-log.json" />
     <exclude domain="file" path="vosk-en" />
     <exclude domain="sharedpref" path="dune-secure.xml" />
+    <exclude domain="sharedpref" path="dune-local.xml" />
 </full-backup-content>

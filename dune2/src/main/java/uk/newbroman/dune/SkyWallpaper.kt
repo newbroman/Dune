@@ -163,7 +163,7 @@ class SkyWallpaper : WallpaperService() {
         private var modelMinute = -1L
         private val start = System.currentTimeMillis()
         private val painter = SkyPainter(applicationContext)
-        private val tick = object : Runnable { override fun run() { draw(); if (visible) main.postDelayed(this, 80) } }
+        private val tick = object : Runnable { override fun run() { draw(); if (visible) main.postDelayed(this, 250) } }
 
         private fun load() {
             val o = saved(applicationContext)

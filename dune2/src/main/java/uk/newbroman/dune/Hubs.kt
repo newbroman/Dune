@@ -81,7 +81,12 @@ object Hubs {
     fun byId(id: String) = ALL.firstOrNull { it.id == id }
     /** The hubs switched on, in order, Home always first. */
     fun enabled(s: Store): List<Hub> {
-        // Introduce hubs added since this phone last looked (but never re-add one you switched off).
+        val left = leftOf(s)
+        return (listOfNotNull(left, "home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" && it != left })
+            .distinct().mapNotNull { byId(it) }
+    }
+    /** Once at start-up: switch on hubs added since this phone last looked (but never re-add one you switched off). */
+    fun introduceNew(s: Store) {
         val known = s.hubsKnown.value.split(',').filter { it.isNotEmpty() }
         // First run of a version with this check: everything except the hubs new since 2.1 counts as already offered.
         if (known.isEmpty()) s.hubsKnown.set(ALL.map { it.id }.filter { it !in NEW_IN_2_2 }.joinToString(","))
@@ -93,9 +98,6 @@ object Hubs {
                 s.hubsKnown.set((known + fresh).joinToString(","))
             }
         }
-        val left = leftOf(s)
-        return (listOfNotNull(left, "home") + s.hubs.value.split(',').map { it.trim() }.filter { it.isNotEmpty() && it != "home" && it != left })
-            .distinct().mapNotNull { byId(it) }
     }
     /** The hub one swipe to the left of Home (Groups, as in Dune 1), or null for none. */
     fun leftOf(s: Store): String? = s.leftHub.value.takeIf { it.isNotEmpty() && it != "home" && byId(it) != null }
@@ -120,7 +122,8 @@ fun HubScreen(vm: LauncherVM) {
         Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color(0x73000000)))
     } else if (s.showSky.value) {
         val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME && vm.currentHub == "home", vm.skyLat, vm.skyLon)
-        SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
+        SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading,
+            animate = vm.screen == Screen.HOME && vm.currentHub == "home")
     }
     LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != homeAt) pager.animateScrollToPage(homeAt) }
     // Keep an eye on what's playing (for Home's Music line and the recently-played list).
@@ -162,9 +165,7 @@ fun HubScreen(vm: LauncherVM) {
         }
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("settings", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { vm.screen = Screen.SETTINGS }.padding(vertical = 12.dp))
-            Spacer(Modifier.weight(1f))
-            Text("drive", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { Drive.set(ctx, true); vm.screen = Screen.DRIVE }.padding(vertical = 12.dp))
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))   // (no "drive" link here: too easy to tap by mistake – it's in Settings, voice and the car)
             Text("apps  ⌃", color = Fg, fontSize = 17.sp, modifier = Modifier.combinedClickable { vm.screen = Screen.DRAWER }.padding(12.dp))
         }
     }
@@ -323,7 +324,6 @@ object HomeHub : Hub {
             if (s.showWeather.value) item { WeatherBlock(vm) }
             if (s.showFavs.value) item { FavouritesBlock(vm) }
             if (s.showWorkspaces.value) item { WorkspacesBlock(vm) }
-            if (s.showCoinbase.value && vm.coinbaseKey != null) item { CoinbaseBlock(vm) }
             if (s.showTermux.value) item { TermuxBlock(vm) }
             if (s.showL14.value) item { L14Block(vm) }
             item { Spacer(Modifier.height(32.dp)) }

@@ -93,7 +93,17 @@ object Drive {
     }
 
     fun intent(ctx: Context) = Intent(ctx, MainActivity::class.java)
-        .putExtra("drive", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        .putExtra("drive", true).putExtra("key", key(ctx)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+    /** A random key only Dune knows: Drive/wake requests without it (from other apps) are ignored. */
+    fun key(ctx: Context): String {
+        val p = ctx.getSharedPreferences("dune-local", 0)
+        return p.getString("intentKey", null) ?: java.util.UUID.randomUUID().toString().also { p.edit().putString("intentKey", it).apply() }
+    }
+    fun fromDune(ctx: Context, i: Intent) = i.getStringExtra("key") == key(ctx)
+
+    /** Drive mode starts by itself only for Bluetooth devices with "car" in their name (Car Audio, MyCar, CAR-KIT…). */
+    fun isCarName(name: String?) = name != null && Regex("(?i)(^|[^a-z])car($|[^a-z])|car(audio|kit|play|stereo|link|media|multimedia)|[a-z]car($|[^a-z])").containsMatchIn(name)
 
     /** Car connected: switch on, then open the Drive screen (or offer it as a notification). */
     fun carConnected(ctx: Context) {
@@ -140,9 +150,10 @@ class CarReceiver : BroadcastReceiver() {
         val dev: BluetoothDevice? = if (Build.VERSION.SDK_INT >= 33)
             intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
         else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-        val addr = dev?.address ?: return
+        dev ?: return
         val store = Store.get(ctx)
-        if (!store.driveAuto.value || addr !in store.carDevices) return
+        val name = if (Drive.hasBtPermission(ctx)) runCatching { @Suppress("MissingPermission") dev.name }.getOrNull() else null
+        if (!store.driveAuto.value || !Drive.isCarName(name)) return
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> Drive.carConnected(ctx)
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> Drive.set(ctx, false)

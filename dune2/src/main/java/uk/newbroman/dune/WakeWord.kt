@@ -92,7 +92,11 @@ object WakeWord {
     fun sync(ctx: Context) {
         val want = Drive.active.value && enabled(ctx) && hasModel(ctx) && hasMic(ctx)
         val i = Intent(ctx, WakeService::class.java)
-        if (want) runCatching { ctx.startForegroundService(i) } else ctx.stopService(i)
+        // Android 14+ only lets a microphone service start while Dune is on screen; if this was called from
+        // the background (the car connecting), it fails here and MainActivity starts it when Dune comes up.
+        if (want && !WakeService.running) runCatching { ctx.startForegroundService(i) }
+            .onFailure { android.util.Log.w("Dune", "wake word will start when Dune opens: ${it.message}") }
+        else if (!want) ctx.stopService(i)
     }
 
     /** After the spoken command has been handled, listen for the wake word again. */
@@ -177,7 +181,7 @@ class WakeService : Service(), RecognitionListener {
         stopListening()   // free the microphone for Android's recogniser
         startActivity(Intent(this, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra("drive", true).putExtra("wake", true))
+            .putExtra("drive", true).putExtra("wake", true).putExtra("key", Drive.key(this)))
         // If the prompt never reports back (e.g. it couldn't open), listen again anyway.
         main.removeCallbacks(resumeLater); main.postDelayed(resumeLater, 20_000)
     }

@@ -136,7 +136,8 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
     var routeShown by remember { mutableStateOf<List<Pair<Double, Double>>?>(null) }
     val ready = remember { booleanArrayOf(false) }   // Dune's own map loaded and ready for drawing
     // GIS: layers, their load status, the survey, and the OS grid reference of where you are.
-    var layers by remember { mutableStateOf(Gis.load(act)) }
+    var layers by remember { mutableStateOf<List<Gis.Layer>>(emptyList()) }
+    var layersLoaded by remember { mutableStateOf(false) }
     val layerStatus = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
     var surveyCount by remember { mutableIntStateOf(0) }
     var grid by remember { mutableStateOf<String?>(null) }
@@ -195,7 +196,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                     cb.invoke(origin, hasAny(act), false)
             }
             addJavascriptInterface(object {
-                @JavascriptInterface fun following(on: Boolean) { post { following = on } }
+                @JavascriptInterface fun following(on: Boolean) { if (!ownPage.get()) return; post { following = on } }
                 @JavascriptInterface fun grid(g: String) { if (!ownPage.get()) return; post { grid = g.ifEmpty { null } } }
                 @JavascriptInterface fun layerStatus(id: String, s: String) { if (!ownPage.get()) return; post { layerStatus[id] = s } }
                 @JavascriptInterface fun surveyCount(n: Int) { if (!ownPage.get()) return; post { surveyCount = n } }
@@ -241,6 +242,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
     }
     fun setLayers(l: List<Gis.Layer>) {
+        if (!layersLoaded) return   // (not before the saved list has been read)
         layers = l; Gis.save(act, l)
         if (ready[0]) web.evaluateJavascript("gisSetLayers(${Gis.toJs(l)})", null)
         else if (source.site != null && l.any { it.on }) show(MAP_SOURCES.first { it.id == "dark" })   // drawn once Dune's map loads
@@ -285,7 +287,13 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         setLayers(layers.map { if (it.kind == "file") it.copy(on = false) else it })
         act.toast("The map ran out of memory – file layers are switched off. Turn them on one at a time.")
     }
-    LaunchedEffect(vm.gisImport) {
+    // The layer list is a file: read it off the main thread, then draw it if the map is ready.
+    LaunchedEffect(Unit) {
+        layers = withContext(Dispatchers.IO) { Gis.load(act) }; layersLoaded = true
+        if (ready[0]) web.evaluateJavascript("gisSetLayers(${Gis.toJs(layers)})", null)
+    }
+    LaunchedEffect(vm.gisImport, layersLoaded) {
+        if (!layersLoaded) return@LaunchedEffect
         val u = vm.gisImport ?: return@LaunchedEffect
         vm.gisImport = null
         importFiles(u)

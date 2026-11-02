@@ -49,42 +49,6 @@ internal fun ago(t: Long): String {
     val m = (System.currentTimeMillis() - t) / 60_000
     return when { m < 1 -> "now"; m < 60 -> "${m}m"; m < 24 * 60 -> "${m / 60}h"; else -> "${m / 1440}d" }
 }
-
-/** Everything that has come in – messages, email, the rest – in one stream, newest first. */
-@Composable
-fun InboxPage(vm: LauncherVM, gestures: NestedScrollConnection) {
-    val act = LocalContext.current as MainActivity
-    val items by NotifService.items.collectAsState()
-    // Default: only what people sent you (messages and email); the rest is one tap away.
-    var filter by rememberSaveable { mutableStateOf("people") }
-    var replying by remember { mutableStateOf<String?>(null) }
-    val shown = items.filter { when (filter) { "all" -> true; "people" -> it.kind != "other"; else -> it.kind == filter } }
-    SidePage("Inbox", gestures) {
-        item {
-            FlowRow {
-                listOf("people" to "Messages & email ${items.count { it.kind != "other" }}", "other" to "Other ${items.count { it.kind == "other" }}", "all" to "All").forEach { (k, l) ->
-                    Text(l, color = if (filter == k) Sand else Dim, fontSize = 14.sp,
-                        modifier = Modifier.combinedClickable { filter = k }.padding(end = 16.dp, bottom = 8.dp))
-                }
-            }
-            if (Brain.ready(act)) Row(verticalAlignment = Alignment.CenterVertically) {
-                Chip(if (vm.aiBusy) "…" else "✦ Catch me up") {
-                    vm.askAi("Catch me up: summarise my messages and emails from the last day – who wants what, and anything I need to reply to or do. Group by person.",
-                        onAnswer = { vm.inboxAnswer = it })
-                }
-                if (items.isNotEmpty()) Chip("clear all") { NotifService.instance?.cancelAllNotifications() }
-            } else if (items.isNotEmpty()) Chip("clear all") { NotifService.instance?.cancelAllNotifications() }
-            vm.inboxAnswer?.let {
-                Text(it, color = Fg, fontSize = 15.sp, modifier = Modifier.fillMaxWidth()
-                    .combinedClickable { vm.inboxAnswer = null }.padding(vertical = 8.dp))
-            }
-            if (shown.isEmpty()) Text(if (NotifService.instance == null) "Allow notification access in settings to see them here" else "Nothing here",
-                color = Faint, fontSize = 15.sp, modifier = Modifier.padding(vertical = 12.dp))
-        }
-        shown.forEach { n -> item(key = n.key) { InboxRow(vm, n, replying == n.key) { replying = if (replying == n.key) null else n.key } } }
-    }
-}
-
 @Composable
 internal fun InboxRow(vm: LauncherVM, n: NotifItem, open: Boolean, toggleReply: () -> Unit) {
     val act = LocalContext.current as MainActivity

@@ -70,6 +70,7 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
             }
             override fun onPageStarted(v: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 loaded = false
+                onHome = url != null && Uri.parse(url).host == Uri.parse(home).host   // the bridge only answers the app's own site
                 // Older WebViews: inject as early as we can.
                 if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) { v.evaluateJavascript(SHIM, null); v.evaluateJavascript(DOWNLOADS, null) }
             }
@@ -92,6 +93,7 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
     }
 
     private var loaded = false
+    @Volatile private var onHome = true
     private val whenLoaded = ArrayList<String>()
     /** Runs some of the page's own JavaScript, waiting for the page to finish loading if need be. */
     fun runWhenLoaded(code: String) { main.post { if (loaded) view.evaluateJavascript(code, null) else whenLoaded += code } }
@@ -130,12 +132,12 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
     private fun q(s: String) = JSONObject.quote(s)
 
     inner class Bridge {
-        @JavascriptInterface fun recStart(id: Int, lang: String, interim: Boolean) = main.post { startRec(id, lang, interim) }
-        @JavascriptInterface fun recStop(id: Int) = main.post { recognizer?.stopListening() }
-        @JavascriptInterface fun speak(id: Int, text: String, lang: String, rate: Float, pitch: Float) = main.post { say(id, text, lang, rate, pitch) }
-        @JavascriptInterface fun ttsStop() = main.post { tts?.stop() }
+        @JavascriptInterface fun recStart(id: Int, lang: String, interim: Boolean) { if (onHome) main.post { startRec(id, lang, interim) } }
+        @JavascriptInterface fun recStop(id: Int) { if (onHome) main.post { recognizer?.stopListening() } }
+        @JavascriptInterface fun speak(id: Int, text: String, lang: String, rate: Float, pitch: Float) { if (onHome) main.post { say(id, text, lang, rate, pitch) } }
+        @JavascriptInterface fun ttsStop() { if (onHome) main.post { tts?.stop() } }
         /** A file the page "downloaded" (e.g. the well logger's CSV): saved to Downloads/Dune, then offered to share. */
-        @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) = main.post { act.saveDownload(name, mime, b64) }
+        @JavascriptInterface fun saveFile(name: String, mime: String, b64: String) { if (onHome) main.post { act.saveDownload(name, mime, b64) } }
     }
 
     private fun startRec(id: Int, lang: String, interim: Boolean) {

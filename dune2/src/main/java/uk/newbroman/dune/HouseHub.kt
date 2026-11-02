@@ -83,8 +83,8 @@ object HouseHub : Hub {
 
         // ---- tado
         var tado by remember { mutableStateOf(Tado.cached(act)) }
-        var tadoMsg by remember { mutableStateOf<String?>(null) }
-        var login by remember { mutableStateOf<Tado.Login?>(null) }
+        var tadoMsg by vm.keep<String?>("house.tadoMsg") { null }
+        var login by vm.keep<Tado.Login?>("house.login") { null }
         var linked by remember { mutableStateOf(Tado.linked(act)) }
         fun loadTado(force: Boolean) = scope.launch {
             if (!Tado.linked(act)) return@launch
@@ -93,13 +93,13 @@ object HouseHub : Hub {
         }
         // ---- plugs
         var plugs by remember { mutableStateOf(Plugs.saved(act)) }
-        var plugMsg by remember { mutableStateOf<String?>(null) }
+        var plugMsg by vm.keep<String?>("house.plugMsg") { null }
         var hasAccount by remember { mutableStateOf(Plugs.account(act) != null) }
         fun loadPlugs() = scope.launch { if (plugs.isNotEmpty()) plugs = Plugs.readAll(act, plugs) }
         // ---- scenes
         var scenes by remember { mutableStateOf(Scenes.all(act)) }
         var saving by remember { mutableStateOf(false) }
-        var sceneMsg by remember { mutableStateOf<String?>(null) }
+        var sceneMsg by vm.keep<String?>("house.sceneMsg") { null }
 
         LaunchedEffect(active) { if (active) { loadTado(false); loadPlugs() } }
         // tado sign-in: poll until confirmed on tado's page

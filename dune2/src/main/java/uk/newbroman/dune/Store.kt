@@ -69,12 +69,9 @@ class Store private constructor(ctx: Context) {
     val clock24 = Flag("clock24", true)
     val autoKeyboard = Flag("autoKeyboard", true)
     val showWeather = Flag("showWeather", true)
-    val showNotifs = Flag("showNotifs", true)
-    val showTasks = Flag("showTasks", true)
     val showFavs = Flag("showFavs", true)
     val showTermux = Flag("showTermux", true)
     val showL14 = Flag("showL14", true)
-    val showGroups = Flag("showGroups", true)
     val showSky = Flag("showSky", true)
     /** Behind the home hubs: your phone's wallpaper (darkened a little so text stays readable), or Dune's sky. */
     val useWallpaper = Flag("useWallpaper", false)
@@ -90,8 +87,6 @@ class Store private constructor(ctx: Context) {
     val polishClock = Flag("polishClock", true)
     val showPhrase = Flag("showPhrase", true)
     val showAssistant = Flag("showAssistant", true)
-    val showWidgets = Flag("showWidgets", true)
-    val showCoinbase = Flag("showCoinbase", true)
     /** Widget shown in place of Dune's own weather, as "id:heightDp" (blank = Dune's weather). */
     val weatherWidget = Str("weatherWidget", "")
     /** Widgets on the weather page (four swipes left), "id:heightDp" separated by commas. */

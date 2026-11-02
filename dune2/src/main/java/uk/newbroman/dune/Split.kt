@@ -79,7 +79,7 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
     companion object { @Volatile var instance: SplitService? = null; private set
         fun enabled() = instance != null
         fun settings(ctx: Context) { ctx.tryStart(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-        fun log(ctx: Context): String? = ctx.getSharedPreferences("dune", 0).getString("splitLog", null)
+        fun log(ctx: Context): String? = ctx.getSharedPreferences("dune-local", 0).getString("splitLog", null)
         private val SPLIT_WORDS = Regex("(?i)^\\s*(split( screen| top| left| right| bottom)?|multi.?window|split.?view)\\s*$")
     }
     private val main = Handler(Looper.getMainLooper())
@@ -255,5 +255,5 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
         }
         save()
     }
-    private fun save() { getSharedPreferences("dune", 0).edit().putString("splitLog", trace.toString().take(12000)).apply() }
+    private fun save() { getSharedPreferences("dune-local", 0).edit().putString("splitLog", trace.toString().take(12000)).apply() }
 }

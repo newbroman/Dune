@@ -74,17 +74,17 @@ object ConnectHub : Hub {
         var showNearby by remember { mutableStateOf(false) }
         var nearby by remember { mutableStateOf<List<Nearby>>(emptyList()) }
         var nearbyNote by remember { mutableStateOf<String?>(null) }
-        var publicIp by remember { mutableStateOf<String?>(null) }
-        var speed by remember { mutableStateOf<String?>(null) }
-        var scanState by remember { mutableStateOf<String?>(null) }
-        var hosts by remember { mutableStateOf<List<LanHost>>(emptyList()) }
+        var publicIp by vm.keep<String?>("connect.publicIp") { null }
+        var speed by vm.keep<String?>("connect.speed") { null }
+        var scanState by vm.keep<String?>("connect.scanState") { null }
+        var hosts by vm.keep<List<LanHost>>("connect.hosts") { emptyList() }
         var openHost by remember { mutableStateOf<String?>(null) }
         // RoboShadow-style tools: full port scans per device, the outside view, history and reports.
         val portScans = remember { androidx.compose.runtime.mutableStateMapOf<String, List<OpenPort>>() }
         val portProgress = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
-        var fresh by remember { mutableStateOf<Set<String>>(emptySet()) }
-        var outsideState by remember { mutableStateOf<String?>(null) }
-        var outsideResult by remember { mutableStateOf<List<OpenPort>?>(null) }
+        var fresh by vm.keep<Set<String>>("connect.fresh") { emptySet() }
+        var outsideState by vm.keep<String?>("connect.outsideState") { null }
+        var outsideResult by vm.keep<List<OpenPort>?>("connect.outsideResult") { null }
         var showHistory by remember { mutableStateOf(false) }
         val prefs = remember { act.getSharedPreferences("dune", 0) }
         // Remember the home network's public address while on Wi-Fi, so it can be checked from outside later.
@@ -158,7 +158,7 @@ object ConnectHub : Hub {
                         Text(d.kind, fontSize = 16.sp, modifier = Modifier.padding(end = 10.dp))
                         Text(d.name, color = if (d.connected) Fg else Dim, fontSize = 16.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                         if (d.connected) Text("connected", color = Sand, fontSize = 12.sp)
-                        if (d.name in vm.store.carDevices || d.address in vm.store.carDevices) Text("  car", color = Dim, fontSize = 12.sp)
+                        if (Drive.isCarName(d.name)) Text("  car", color = Dim, fontSize = 12.sp)
                     }
                 }
             }
@@ -172,7 +172,7 @@ object ConnectHub : Hub {
                         val ip = w?.ip
                         if (ip == null || w.connected.not()) { act.toast("Join a Wi-Fi network first"); return@Chip }
                         if (scanState != null) return@Chip
-                        scope.launch {
+                        vm.longScope.launch {   // keeps going if you swipe away
                             scanState = "scanning…"
                             val announced = async { Net.announce(act) }
                             val found = Net.scan(ip, w.prefix) { d, n -> scanState = "scanning… ${d * 100 / n}%" }
@@ -203,7 +203,7 @@ object ConnectHub : Hub {
                         val home = prefs.getString("homePublicIp", null)
                         if (home == null) { act.toast("Open this hub once on your home Wi-Fi first, so Dune knows its public address"); return@Chip }
                         if (wifi?.connected == true) { act.toast("Turn Wi-Fi off and use mobile data: Dune then checks $home from outside, as an attacker would"); return@Chip }
-                        scope.launch {
+                        vm.longScope.launch {   // keeps going if you swipe away
                             outsideState = "checking $home…"
                             outsideResult = Scanner.outside(home) { p -> outsideState = "checking… $p%" }
                             outsideState = null
@@ -273,7 +273,7 @@ object ConnectHub : Hub {
                     Chip(speed ?: "speed test") {
                         if (speed?.endsWith("…") == true) return@Chip
                         speed = "testing…"
-                        scope.launch {
+                        vm.longScope.launch {   // keeps going if you swipe away
                             val r = Net.speed { speed = it }
                             speed = r?.let { (m, p) -> "%.0f Mbps down · %d ms".format(m, p) } ?: "speed test failed"
                         }

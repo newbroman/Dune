@@ -72,6 +72,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -116,9 +117,15 @@ fun DuneApp(vm: LauncherVM) {
         // On the home hubs your wallpaper shows through (if chosen); every other screen stays solid black.
         val seeThrough = vm.store.useWallpaper.value && vm.screen == Screen.HOME
         Surface(Modifier.fillMaxSize(), color = if (seeThrough) androidx.compose.ui.graphics.Color.Transparent else Bg) {
+            // The hubs stay alive underneath every other screen, so opening the app list or Settings
+            // doesn't rebuild them (and the map, music watcher and pages keep their state).
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+            HubScreen(vm)
             Crossfade(vm.screen, label = "screen") {
+                if (it != Screen.HOME) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(Bg)
+                    .then(Modifier.pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } })) {
                 when (it) {
-                    Screen.HOME -> HubScreen(vm)
+                    Screen.HOME -> {}
                     Screen.DRAWER -> DrawerScreen(vm)
                     Screen.SETTINGS -> SettingsScreen(vm)
                     Screen.GROUP -> GroupScreen(vm)
@@ -130,6 +137,8 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.WELLS -> WellsFull(vm)
                     Screen.SHOP -> ShopScreen(vm)
                 }
+                }
+            }
             }
             vm.moving?.let { MoveDialog(vm, it) }
         }
@@ -154,108 +163,6 @@ internal fun rememberOverscrollGestures(up: () -> Unit, down: () -> Unit) = reme
 }
 
 // ---------------------------------------------------------------- Home
-
-@Composable
-fun HomeScreen(vm: LauncherVM) {
-    val ctx = LocalContext.current
-    val s = vm.store
-    val listState = rememberLazyListState()
-    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME) listState.scrollToItem(0) }
-    val gestures = rememberOverscrollGestures(
-        up = { vm.screen = Screen.DRAWER },
-        down = { Actions.expandNotifications(ctx) },
-    )
-    val isDefault = remember(vm.resumeTick) { Actions.isDefaultHome(ctx) }
-
-    if (s.showSky.value) {
-        val heading by rememberHeading(s.skyCompass.value && vm.screen == Screen.HOME, vm.skyLat, vm.skyLon)
-        SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading)
-    }
-    // Three pages: swipe right for Groups, left for Widgets; home in the middle.
-    // Pages: 0 Rozmowa, 1 Groups, 2 home, 3 Widgets, 4 Inbox, 5 Map, 6 Weather.
-    val pager = rememberPagerState(initialPage = HOME_PAGE) { 7 }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != HOME_PAGE) pager.animateScrollToPage(HOME_PAGE) }
-    LaunchedEffect(pager.currentPage) { vm.homePage = pager.currentPage }
-    LaunchedEffect(vm.jumpTo) { vm.jumpTo?.let { pager.animateScrollToPage(it); vm.jumpTo = null } }
-
-    Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-      HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
-       when (page) {
-        0 -> RozmowaPage(vm)
-        1 -> SidePage("Groups", gestures) {
-            item { GroupsBlock(vm, title = false) }
-            item {
-                Text("Long-press any app › Move or copy to group to change where it goes. Rules are in settings.",
-                    color = Faint, fontSize = 12.sp, modifier = Modifier.padding(top = 12.dp))
-            }
-        }
-        3 -> SidePage("Widgets", gestures) {
-            item { WidgetsBlock(vm) }
-        }
-        4 -> InboxPage(vm, gestures)
-        5 -> MapPage(vm, active = pager.currentPage == 5 && vm.screen == Screen.HOME)
-        6 -> ForecastPage(vm, true, gestures)
-        else -> LazyColumn(
-            Modifier.fillMaxSize().nestedScroll(gestures).padding(horizontal = 24.dp),
-            state = listState,
-        ) {
-            if (!isDefault) item {
-                Text(
-                    "Make Dune your home app  →", color = Sand, fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 16.dp).combinedClickable { Actions.homeSettings(ctx) }
-                )
-            }
-            item { ClockBlock(vm) }
-            if (s.showAssistant.value) item { AssistantBlock(vm) }
-            if (s.showPhrase.value) item { PhraseBlock(vm) }
-            if (s.showWeather.value) item { WeatherBlock(vm) }
-            if (s.showCoinbase.value && vm.coinbaseKey != null) item { CoinbaseBlock(vm) }
-            if (s.showNotifs.value) item { NotificationsBlock(vm) }
-            if (s.showTasks.value) item { TasksBlock(s) }
-            if (s.showFavs.value) item { FavouritesBlock(vm) }
-            if (s.showWorkspaces.value) item { WorkspacesBlock(vm) }
-            if (s.showTermux.value) item { TermuxBlock(vm) }
-            if (s.showL14.value) item { L14Block(vm) }
-            item { Spacer(Modifier.height(32.dp)) }
-        }
-       }
-      }
-        // Page marker: groups · home · widgets (tap to jump)
-        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.Center) {
-            listOf("rozmowa", "groups", "•", "widgets", "inbox", "map", "weather").forEachIndexed { i, l ->
-                Text(l, color = if (pager.currentPage == i) Sand else Faint, fontSize = 11.sp,
-                    modifier = Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 5.dp, vertical = 4.dp))
-            }
-        }
-        Row(
-            Modifier.fillMaxWidth().height(56.dp).padding(horizontal = 24.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "settings", color = Dim, fontSize = 14.sp,
-                modifier = Modifier.combinedClickable { vm.screen = Screen.SETTINGS }.padding(vertical = 12.dp)
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "drive", color = Dim, fontSize = 14.sp,
-                modifier = Modifier.combinedClickable { Drive.set(ctx, true); vm.screen = Screen.DRIVE }.padding(vertical = 12.dp)
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "✦ spheres", color = Dim, fontSize = 14.sp,
-                modifier = Modifier.combinedClickable {
-                    ctx.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("https://newbroman.github.io/Music_of_the_Spheres/")))
-                }.padding(vertical = 12.dp)
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                "apps  ⌃", color = Fg, fontSize = 17.sp,
-                modifier = Modifier.combinedClickable { vm.screen = Screen.DRAWER }.padding(12.dp)
-            )
-        }
-    }
-}
 
 @Composable
 internal fun Header(text: String, trailing: String? = null, onTrailing: (() -> Unit)? = null) {
@@ -425,87 +332,6 @@ internal fun WeatherBlock(vm: LauncherVM) {
     if (weawow != null) Text(
         "use a Weawow widget here  →", color = Faint, fontSize = 13.sp,
         modifier = Modifier.combinedClickable { vm.chooseWeatherWidget() }.padding(vertical = 4.dp)
-    )
-}
-
-@Composable
-private fun NotificationsBlock(vm: LauncherVM) {
-    val act = LocalContext.current as Activity
-    val granted = remember(vm.resumeTick) {
-        NotificationManagerCompat.getEnabledListenerPackages(act).contains(act.packageName)
-    }
-    val items by NotifService.items.collectAsState()
-    if (!granted) {
-        Header("Notifications")
-        Text(
-            "Allow notification access to see them here  →", color = Dim, fontSize = 15.sp,
-            modifier = Modifier.combinedClickable { Actions.notificationAccess(act) }.padding(vertical = 6.dp)
-        )
-        Text(
-            "Greyed out? App info › ⋮ › Allow restricted settings, then try again  →", color = Faint, fontSize = 13.sp,
-            modifier = Modifier.combinedClickable { Actions.appSettings(act) }.padding(vertical = 4.dp)
-        )
-        return
-    }
-    // Everything now lives in the Inbox page; the home screen just says what's waiting.
-    val people = items.count { it.kind != "other" }
-    val other = items.size - people
-    Header("Inbox", "open") { vm.jumpHub = "comms" }
-    Text(
-        when {
-            items.isEmpty() -> "Nothing new"
-            people == 0 -> "$other other notification" + (if (other == 1) "" else "s")
-            else -> "$people message" + (if (people == 1) "" else "s") + (if (other > 0) "  ·  $other other" else "") +
-                "  ·  " + items.filter { it.kind != "other" }.map { it.title.ifBlank { vm.labelFor(it.pkg) } }.distinct().take(3).joinToString(", ")
-        },
-        color = if (people > 0) Fg else Faint, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth().combinedClickable { vm.jumpHub = "comms" }.padding(vertical = 6.dp)
-    )
-}
-
-@Composable
-internal fun TasksBlock(s: Store) {
-    var draft by rememberSaveable { mutableStateOf("") }
-    val tasks = s.tasks
-    val open = tasks.count { !it.done }
-    Header(
-        if (open > 0) "Tasks · $open" else "Tasks",
-        if (tasks.any { it.done }) "clear done" else null,
-    ) { s.clearDone() }
-    tasks.forEach { t ->
-        var menu by remember { mutableStateOf(false) }
-        Box {
-            Row(
-                Modifier.fillMaxWidth()
-                    .combinedClickable(onLongClick = { menu = true }, onClick = { s.toggleTask(t.id) })
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(if (t.done) "●" else "○", color = if (t.done) Faint else Sand, fontSize = 16.sp)
-                Spacer(Modifier.width(12.dp))
-                Text(
-                    t.text, fontSize = 17.sp, color = if (t.done) Faint else Fg,
-                    textDecoration = if (t.done) TextDecoration.LineThrough else null,
-                )
-            }
-            DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                DropdownMenuItem(text = { Text("Delete") }, onClick = { menu = false; s.deleteTask(t.id) })
-            }
-        }
-    }
-    BasicTextField(
-        value = draft, onValueChange = { draft = it },
-        textStyle = TextStyle(color = Fg, fontSize = 17.sp), cursorBrush = SolidColor(Sand), singleLine = true,
-        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
-        keyboardActions = KeyboardActions(onDone = { s.addTask(draft); draft = "" }),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-        decorationBox = { inner ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("+", color = Dim, fontSize = 17.sp)
-                Spacer(Modifier.width(12.dp))
-                Box { if (draft.isEmpty()) Text("Add a task", color = Faint, fontSize = 17.sp); inner() }
-            }
-        },
     )
 }
 
@@ -854,11 +680,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Date and time in Polish", s.polishClock) }
         item { Toggle("Ask bar (assistant)", s.showAssistant) }
         item { Toggle("Polish phrase of the day", s.showPhrase) }
-        item { Toggle("Widgets", s.showWidgets) }
-        item { Toggle("Coinbase holdings", s.showCoinbase) }
         item { Toggle("Weather", s.showWeather) }
-        item { Toggle("Inbox summary", s.showNotifs) }
-        item { Toggle("Tasks", s.showTasks) }
         item { Toggle("Sky background", s.showSky) }
         item {
             val tick = vm.resumeTick   // re-read the wallpaper state on returning from Android's screen
@@ -881,7 +703,6 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Show the phone's wallpaper behind Dune instead of drawing the sky", s.useWallpaper) }
         item { Toggle("Weather on the sky", s.skyWeather) }
         item { Toggle("Turn the sky with the compass", s.skyCompass) }
-        item { Toggle("App groups", s.showGroups) }
         item { Toggle("Favourites", s.showFavs) }
         item { Toggle("Termux shortcuts", s.showTermux) }
         item { Toggle("L14", s.showL14) }
@@ -907,6 +728,8 @@ fun SettingsScreen(vm: LauncherVM) {
 
         section("Coinbase")
         item { CoinbaseSettings(vm) }
+        // Holdings live here now, not on Home; fetched when you open this part of Settings.
+        if (vm.coinbaseKey != null) item { LaunchedEffect(Unit) { vm.refreshCoinbase() }; CoinbaseBlock(vm) }
 
         section("Drive mode")
         item {
@@ -950,7 +773,15 @@ fun SettingsScreen(vm: LauncherVM) {
             Note("Warnings (backups, services, disk, NRG jobs) come from l14-status on the L14. " +
                 "Get its token on the L14 with:  l14-status.py token   Leave the token blank to turn warnings off.")
             Field("Status port", s.l14StatusPort, number = true)
-            Field("Status token", s.l14StatusToken)
+            run {
+                var have by remember { mutableStateOf(vm.l14Token().isNotEmpty()) }
+                if (have) LinkRow("✓ Status token saved (encrypted) – remove it") { Secure.put(act, "l14Token", null); have = false }
+                else {
+                    var t by remember { mutableStateOf("") }
+                    androidx.compose.material3.OutlinedTextField(t, { t = it }, label = { Text("Status token") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    LinkRow("Save the token") { if (t.isNotBlank()) { Secure.put(act, "l14Token", t.trim()); t = ""; have = true; vm.checkL14() } }
+                }
+            }
         }
         item {
             Note("Commands run on the L14 over SSH, one per line:  Label | command")
@@ -1250,7 +1081,7 @@ private fun CarPicker(vm: LauncherVM) {
     var tick by remember { mutableIntStateOf(0) }
     val devices = remember(tick) { Drive.pairedDevices(act) }
     if (!Drive.hasBtPermission(act) || devices.isEmpty()) {
-        LinkRow("Choose your car's Bluetooth") {
+        LinkRow("Let Dune see Bluetooth devices (for Drive mode)") {
             val after: () -> Unit = {
                 tick++
                 if (android.os.Build.VERSION.SDK_INT >= 33 &&
@@ -1264,14 +1095,10 @@ private fun CarPicker(vm: LauncherVM) {
         if (Drive.hasBtPermission(act) && devices.isEmpty()) Note("No paired Bluetooth devices – pair the car in Android settings first.")
         return
     }
-    Note("Tick your car(s):")
-    devices.forEach { (name, addr) ->
-        val on = addr in s.carDevices
-        Text(
-            (if (on) "☑  " else "☐  ") + name, color = if (on) Sand else Fg, fontSize = 17.sp,
-            modifier = Modifier.fillMaxWidth().combinedClickable { s.setCar(addr, !on) }.padding(vertical = 8.dp)
-        )
-    }
+    val cars = devices.filter { Drive.isCarName(it.first) }
+    Note("Drive mode starts by itself only when a Bluetooth device with “car” in its name connects (e.g. “Car Audio”, “MyCar”). " +
+        if (cars.isEmpty()) "None of your paired devices has “car” in its name – rename the head unit's Bluetooth name in its own settings, or start Drive mode by hand."
+        else "Paired devices that count: " + cars.joinToString(", ") { it.first } + ".")
 }
 
 private fun money(v: Double) = "£" + String.format(java.util.Locale.UK, "%,.2f", v)

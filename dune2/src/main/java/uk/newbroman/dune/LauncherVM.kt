@@ -161,8 +161,6 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         }
     }
     var inboxAnswer by mutableStateOf<String?>(null)
-    /** Ask the home pager to move to a page (e.g. the inbox). */
-    var jumpTo by mutableStateOf<Int?>(null)
     /** Dune 2: ask the hub pager to show a hub by id. */
     var jumpHub by mutableStateOf<String?>(null)
     /** Dune 2: the hub on screen. */
@@ -174,6 +172,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
     /** Map files to add as layers (opened with Dune from another app). */
+    /** For hub work that should finish even if you swipe away from the hub (scans, speed tests). */
+    val longScope get() = viewModelScope
+    /** Hub page state that should outlive swiping far away (a sign-in in progress, scan results). */
+    private val kept = HashMap<String, androidx.compose.runtime.MutableState<Any?>>()
+    @Suppress("UNCHECKED_CAST")
+    fun <T> keep(key: String, init: () -> T): androidx.compose.runtime.MutableState<T> =
+        kept.getOrPut(key) { mutableStateOf<Any?>(init()) } as androidx.compose.runtime.MutableState<T>
+
     /** What the Shop comparison is searching for. */
     var shopQuery by mutableStateOf("")
     var gisImport by mutableStateOf<List<android.net.Uri>?>(null)
@@ -183,7 +189,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var widgetTarget by mutableStateOf<String?>(null)
 
     // ---------- Coinbase
-    var coinbaseKey by mutableStateOf(Coinbase.load(app))
+    var coinbaseKey by mutableStateOf<Coinbase.ApiKey?>(null)
         private set
     var portfolio by mutableStateOf<Portfolio?>(null)
         private set
@@ -198,7 +204,6 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     fun refreshCoinbase(force: Boolean = false) {
         val k = coinbaseKey ?: return
-        if (!store.showCoinbase.value) return
         val p = portfolio
         if (!force && p != null && System.currentTimeMillis() - p.at < 10 * 60_000L) return
         cbJob?.cancel()
@@ -220,9 +225,16 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** Bumped when icons arrive on disk, so tiles showing a placeholder look again. */
     private var webIconsVersion by mutableIntStateOf(0)
 
+    private val webIconLoading = HashSet<String>()
     fun webIcon(w: WebApp): ImageBitmap? {
         webIconsVersion   // read so composition re-runs when new icons are downloaded
-        return webIcons[w.url] ?: WebApps.icon(ctx, w)?.also { webIcons[w.url] = it }
+        webIcons[w.url]?.let { return it }
+        // Decoding the saved icon is file work: do it off the main thread, then redraw.
+        if (webIconLoading.add(w.url)) viewModelScope.launch {
+            val b = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { WebApps.icon(ctx, w) }.getOrNull() }
+            if (b != null) { webIcons[w.url] = b; webIconsVersion++ }
+        }
+        return null
     }
 
     /** Web pages can be favourites too, stored as "web:<url>". */
@@ -268,6 +280,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     val phrase: Phrase? get() = Phrases.forDay(phrases, java.time.LocalDate.now(), phraseOffset)
 
     init {
+        Hubs.introduceNew(store)
+        viewModelScope.launch { coinbaseKey = kotlinx.coroutines.withContext(Dispatchers.IO) { Coinbase.load(app) } }   // a Keystore decrypt: not at start-up
         la.registerCallback(cb, Handler(Looper.getMainLooper()))
         loadApps()
         Drive.init(app)
@@ -535,9 +549,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         resumeTick++
         SkyWallpaper.afterChoosing(ctx)
         viewModelScope.launch { SkyWallpaper.paintLock(ctx) }
-        refreshCoinbase()
         refreshWeather()
-        checkL14()
+        checkL14(force = false)   // at most every 5 minutes; tap the L14 line for an immediate check
     }
 
     private fun afterSettings() {
@@ -572,21 +585,32 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun checkL14() {
+    private var l14At = 0L
+    /** Is the L14 up, and its warnings. Coming back to Dune checks at most every 5 minutes; taps check now. */
+    fun checkL14(force: Boolean = true) {
         val host = store.l14Host.value.trim()
         if (!store.showL14.value || host.isEmpty()) { l14Online = null; return }
+        if (!force && System.currentTimeMillis() - l14At < 5 * 60_000 && l14Online != null) return
+        l14At = System.currentTimeMillis()
         val port = store.l14Port.value.trim().toIntOrNull() ?: 22
         l14Job?.cancel()
         l14Job = viewModelScope.launch {
             val online = Actions.reachable(host, port)
             l14Online = online
-            val token = store.l14StatusToken.value.trim()
+            val token = l14Token()
             if (!online || token.isEmpty()) { l14StatusErr = null; return@launch }
             val sport = store.l14StatusPort.value.trim().toIntOrNull() ?: 8714
             L14Status.fetch(host, sport, token)
                 .onSuccess { l14Status = it; l14StatusErr = null }
                 .onFailure { l14StatusErr = "status: " + (it.message ?: "no answer").take(60) }
         }
+    }
+
+    /** The L14 status token, kept encrypted (moved out of the plain settings, which Android backs up). */
+    fun l14Token(): String {
+        val old = store.l14StatusToken.value.trim()
+        if (old.isNotEmpty()) { Secure.put(ctx, "l14Token", old); store.l14StatusToken.set("") }
+        return Secure.get(ctx, "l14Token").orEmpty()
     }
 
     fun wakeL14() {

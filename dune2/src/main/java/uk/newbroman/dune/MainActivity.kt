@@ -284,7 +284,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         widgetHost = AppWidgetHost(applicationContext, WIDGET_HOST_ID)
         if (savedInstanceState == null) intent?.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it }
-        if (savedInstanceState == null && intent != null && !voiceIntent(intent) && intent.getBooleanExtra("drive", false)) {
+        if (savedInstanceState == null && intent != null && !voiceIntent(intent) && intent.getBooleanExtra("drive", false) && Drive.fromDune(this, intent)) {
             intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE
         }
         if (savedInstanceState == null) openedFile(intent)
@@ -297,13 +297,13 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         if (voiceIntent(intent)) return
         if (openedFile(intent)) { vm.goHome(); vm.jumpHub = "map"; return }
-        if (intent.getBooleanExtra("drive", false)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
+        if (intent.getBooleanExtra("drive", false) && Drive.fromDune(this, intent)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
         else { vm.goHome(); intent.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it } }
     }
 
     /** "OK Computer" was heard, or a car / headset voice button was pressed: open the Speak prompt. */
     private fun voiceIntent(intent: Intent): Boolean {
-        val wake = intent.getBooleanExtra("wake", false)
+        val wake = intent.getBooleanExtra("wake", false) && Drive.fromDune(this, intent)
         if (!wake && intent.action != Intent.ACTION_VOICE_COMMAND) return false
         intent.removeExtra("wake"); intent.removeExtra("drive")
         if (wake || Drive.active.value) { Drive.set(this, true); vm.screen = Screen.DRIVE }
@@ -312,9 +312,19 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
+    /** Web pages kept alive (Rozmowa, Tongues, the well logger) stop their timers while you're in another app. */
+    override fun onPause() {
+        super.onPause()
+        listOfNotNull(rozmowaWeb, clozeWeb, wellsWeb).forEach { it.view.onPause() }
+        (rozmowaWeb ?: clozeWeb ?: wellsWeb)?.view?.pauseTimers()
+    }
+
     override fun onResume() {
         super.onResume()
         vm.onResume()
         vm.media.listen()   // notification access may have just been granted
+        WakeWord.sync(this)   // in the car: start the wake word now Dune is on screen (it can't start from the background)
+        listOfNotNull(rozmowaWeb, clozeWeb, wellsWeb).forEach { it.view.onResume() }
+        (rozmowaWeb ?: clozeWeb ?: wellsWeb)?.view?.resumeTimers()
     }
 }

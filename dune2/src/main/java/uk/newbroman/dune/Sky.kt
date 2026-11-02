@@ -213,15 +213,17 @@ fun SkyBackground(
     /** True-north bearing the phone faces; the sky turns so that way is up. Null = north up. */
     heading: Float? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
+    /** Twinkle (4 frames a second) – only while Home is showing; otherwise the sky is redrawn once a minute. */
+    animate: Boolean = true,
 ) {
     var frame by remember { mutableLongStateOf(0L) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        // ~12 fps; withFrameNanos stops while the screen is off or Dune is in the background.
+    LaunchedEffect(animate) {
+        // withFrameNanos stops while the screen is off or Dune is in the background.
         while (true) {
             withFrameNanos { frame = it / 1_000_000 }
             now = System.currentTimeMillis()
-            delay(80)
+            delay(if (animate) 250 else 60_000 - System.currentTimeMillis() % 60_000)
         }
     }
     // Positions only change slowly: recompute once a minute.
