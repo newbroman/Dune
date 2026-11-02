@@ -235,27 +235,137 @@ otherwise. Be brief and direct: a sentence or two, or a short list. Plain text, 
 background doesn't contain what he asks about, say so plainly rather than guessing. Never invent messages or events."""
 
     /** Ask the AI. [spoken] keeps the answer short enough to be read aloud in the car. */
-    suspend fun ask(ctx: Context, store: Store, question: String, spoken: Boolean = false): String = withContext(Dispatchers.IO) {
+    /** An answer, and the web pages it used (title, link) when it searched. */
+    data class Answer(val text: String, val sources: List<Pair<String, String>> = emptyList())
+
+    fun webOn(ctx: Context) = prefs(ctx).getBoolean("aiWeb", true)
+    fun setWeb(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("aiWeb", on).apply()
+
+    suspend fun ask(ctx: Context, store: Store, question: String, spoken: Boolean = false): String = askFull(ctx, store, question, spoken).text
+
+    /**
+     * Asks the AI. With web search on, each service's own search is offered and the AI decides when
+     * to use it: OpenAI (Responses web_search), OpenRouter (its web_search tool), Claude (web search
+     * tool), Gemini (Google Search). If a service refuses search, the question is asked again without it.
+     */
+    suspend fun askFull(ctx: Context, store: Store, question: String, spoken: Boolean = false): Answer = withContext(Dispatchers.IO) {
         val key = key(ctx) ?: throw IllegalStateException("Add an AI key in Dune's settings first")
         val p = provider(ctx); val model = model(ctx)
+        val web = webOn(ctx)
         val sys = SYSTEM + (if (spoken) "\nHe is driving: answer in one or two short spoken sentences." else "") +
+            (if (web) "\nYou can search the web. Do so when the question needs current or outside facts (news, prices, opening times, " +
+                "tides, sports, travel, anything after your training); otherwise answer directly. Mention where facts came from in a few words." else "") +
             "\n\nBACKGROUND\n" + context(ctx, store)
+        if (web) runCatching { return@withContext askWeb(p, key, model, sys, question, spoken) }
+            .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e
+                val plain = askPlain(p, key, model, sys, question, spoken)
+                return@withContext plain.copy(text = plain.text + "\n(web search unavailable: ${e.message?.take(80)})") }
+        askPlain(p, key, model, sys, question, spoken)
+    }
+
+    private class Reply(val ok: Boolean, val code: Int, val json: JSONObject?)
+    private fun post(url: String, body: JSONObject, headers: Map<String, String>): Reply {
+        val c = URL(url).openConnection() as HttpURLConnection
+        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15_000; c.readTimeout = 90_000
+        c.setRequestProperty("Content-Type", "application/json")
+        headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
+        c.outputStream.use { it.write(body.toString().toByteArray()) }
+        val ok = c.responseCode in 200..299
+        val txt = (if (ok) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
+        return Reply(ok, c.responseCode, runCatching { JSONObject(txt) }.getOrNull())
+    }
+    private fun fail(r: Reply): Nothing = throw IllegalStateException(r.json?.optJSONObject("error")?.optString("message")?.ifBlank { null }
+        ?: r.json?.optString("message")?.ifBlank { null } ?: "HTTP ${r.code}")
+    private fun auth(p: Provider, key: String) = buildMap {
+        put("Authorization", "Bearer $key")
+        if (p.id == "openrouter") { put("HTTP-Referer", "https://github.com/newbroman/Dune"); put("X-Title", "Dune") }
+    }
+
+    private fun askPlain(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean): Answer {
         val body = JSONObject().put("model", model).put("messages", JSONArray()
             .put(JSONObject().put("role", "system").put("content", sys))
             .put(JSONObject().put("role", "user").put("content", question)))
         if (p.id == "claude") body.put("max_tokens", if (spoken) 300 else 1200)
         if (Regex("^(openai/)?(gpt-5|o\\d)").containsMatchIn(model) || (p.id == "gemini" && model.startsWith("gemini-3"))) body.put("reasoning_effort", "low")
-        val c = URL(p.url).openConnection() as HttpURLConnection
-        c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15_000; c.readTimeout = 60_000
-        c.setRequestProperty("Content-Type", "application/json")
-        c.setRequestProperty("Authorization", "Bearer $key")
-        if (p.id == "openrouter") { c.setRequestProperty("HTTP-Referer", "https://github.com/newbroman/Dune"); c.setRequestProperty("X-Title", "Dune") }
-        c.outputStream.use { it.write(body.toString().toByteArray()) }
-        val ok = c.responseCode in 200..299
-        val txt = (if (ok) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
-        val j = runCatching { JSONObject(txt) }.getOrNull()
-        if (!ok) throw IllegalStateException(j?.optJSONObject("error")?.optString("message")?.ifBlank { null } ?: "HTTP ${c.responseCode}")
-        j?.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content")?.trim()
-            ?.ifBlank { null } ?: throw IllegalStateException("The AI sent back an empty answer")
+        val r = post(p.url, body, auth(p, key))
+        if (!r.ok) fail(r)
+        return parseChat(r.json!!)
     }
+
+    private fun askWeb(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean): Answer = when (p.id) {
+        "openai" -> {
+            val body = JSONObject().put("model", model).put("instructions", sys).put("input", question)
+                .put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
+            if (Regex("^(gpt-5|o\\d)").containsMatchIn(model)) body.put("reasoning", JSONObject().put("effort", "low"))
+            val r = post("https://api.openai.com/v1/responses", body, auth(p, key)); if (!r.ok) fail(r); parseResponses(r.json!!)
+        }
+        "openrouter" -> {
+            val body = JSONObject().put("model", model).put("messages", JSONArray()
+                .put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", question)))
+                .put("tools", JSONArray().put(JSONObject().put("type", "openrouter:web_search").put("parameters", JSONObject().put("max_results", 5))))
+            val r = post(p.url, body, auth(p, key)); if (!r.ok) fail(r); parseChat(r.json!!)
+        }
+        "claude" -> {
+            val body = JSONObject().put("model", model).put("max_tokens", if (spoken) 400 else 1500).put("system", sys)
+                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", question)))
+                .put("tools", JSONArray().put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 3)))
+            val r = post("https://api.anthropic.com/v1/messages", body, mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"))
+            if (!r.ok) fail(r); parseClaude(r.json!!)
+        }
+        "gemini" -> {
+            val body = JSONObject().put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sys))))
+                .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", question)))))
+                .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
+            val r = post("https://generativelanguage.googleapis.com/v1beta/models/${model.removePrefix("models/")}:generateContent", body, mapOf("x-goog-api-key" to key))
+            if (!r.ok) fail(r); parseGemini(r.json!!)
+        }
+        else -> throw IllegalStateException("no web search for ${p.name}")
+    }
+
+    // ---- reading each service's answer and its sources (pure, so they can be tested)
+    private fun nonEmpty(t: String?) = t?.trim()?.ifBlank { null } ?: throw IllegalStateException("The AI sent back an empty answer")
+    private fun dedupe(l: List<Pair<String, String>>) = l.filter { it.second.startsWith("http") }.distinctBy { it.second }.take(5)
+
+    fun parseChat(j: JSONObject): Answer {
+        val m = j.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: throw IllegalStateException("The AI sent back an empty answer")
+        val a = m.optJSONArray("annotations") ?: JSONArray()
+        val src = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.mapNotNull { n ->
+            val u = n.optJSONObject("url_citation") ?: n
+            u.optString("url").takeIf { it.isNotBlank() }?.let { u.optString("title").ifBlank { it } to it }
+        }
+        return Answer(nonEmpty(m.optString("content")), dedupe(src))
+    }
+    fun parseResponses(j: JSONObject): Answer {
+        val out = j.optJSONArray("output") ?: JSONArray()
+        val text = StringBuilder(); val src = ArrayList<Pair<String, String>>()
+        (0 until out.length()).mapNotNull { out.optJSONObject(it) }.filter { it.optString("type") == "message" }.forEach { msg ->
+            val cs = msg.optJSONArray("content") ?: JSONArray()
+            (0 until cs.length()).mapNotNull { cs.optJSONObject(it) }.filter { it.optString("type") == "output_text" || it.has("text") }.forEach { c ->
+                text.append(c.optString("text"))
+                val an = c.optJSONArray("annotations") ?: JSONArray()
+                (0 until an.length()).mapNotNull { an.optJSONObject(it) }.filter { it.optString("type") == "url_citation" }
+                    .forEach { src += it.optString("title").ifBlank { it.optString("url") } to it.optString("url") }
+            }
+        }
+        return Answer(nonEmpty(text.toString().ifBlank { j.optString("output_text") }), dedupe(src))
+    }
+    fun parseClaude(j: JSONObject): Answer {
+        val cs = j.optJSONArray("content") ?: JSONArray()
+        val text = StringBuilder(); val src = ArrayList<Pair<String, String>>()
+        (0 until cs.length()).mapNotNull { cs.optJSONObject(it) }.filter { it.optString("type") == "text" }.forEach { b ->
+            text.append(b.optString("text"))
+            val ci = b.optJSONArray("citations") ?: JSONArray()
+            (0 until ci.length()).mapNotNull { ci.optJSONObject(it) }.forEach { src += it.optString("title").ifBlank { it.optString("url") } to it.optString("url") }
+        }
+        return Answer(nonEmpty(text.toString()), dedupe(src))
+    }
+    fun parseGemini(j: JSONObject): Answer {
+        val cand = j.optJSONArray("candidates")?.optJSONObject(0) ?: throw IllegalStateException("The AI sent back an empty answer")
+        val parts = cand.optJSONObject("content")?.optJSONArray("parts") ?: JSONArray()
+        val text = (0 until parts.length()).mapNotNull { parts.optJSONObject(it)?.optString("text") }.joinToString("")
+        val ch = cand.optJSONObject("groundingMetadata")?.optJSONArray("groundingChunks") ?: JSONArray()
+        val src = (0 until ch.length()).mapNotNull { ch.optJSONObject(it)?.optJSONObject("web") }.map { it.optString("title").ifBlank { it.optString("uri") } to it.optString("uri") }
+        return Answer(nonEmpty(text), dedupe(src))
+    }
+
 }

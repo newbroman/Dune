@@ -151,11 +151,15 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     /** Dune's AI (Brain): one question at a time; the answer goes to [onAnswer]. */
     var aiBusy by mutableStateOf(false)
+    /** Web pages the last answer came from (title, link). */
+    var assistantSources by mutableStateOf<List<Pair<String, String>>>(emptyList())
     fun askAi(question: String, speak: Boolean = false, sayIt: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
         if (aiBusy) { onAnswer("Still thinking about the last question…"); return }
-        aiBusy = true; onAnswer("Thinking…")
+        aiBusy = true; assistantSources = emptyList(); onAnswer(if (Brain.webOn(ctx)) "Thinking (and searching if it needs to)…" else "Thinking…")
         viewModelScope.launch {
-            val a = try { Brain.ask(ctx, store, question, spoken = speak) } catch (e: Exception) { "AI: " + (e.message ?: "something went wrong") }
+            val full = try { Brain.askFull(ctx, store, question, spoken = speak) } catch (e: Exception) { Brain.Answer("AI: " + (e.message ?: "something went wrong")) }
+            val a = full.text
+            assistantSources = full.sources
             aiBusy = false; onAnswer(a)
             if (speak || sayIt) Speaker.speak(ctx, a)
         }

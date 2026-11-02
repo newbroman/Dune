@@ -165,7 +165,9 @@ fun HubScreen(vm: LauncherVM) {
         }
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("settings", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { vm.screen = Screen.SETTINGS }.padding(vertical = 12.dp))
-            Spacer(Modifier.weight(1f))   // (no "drive" link here: too easy to tap by mistake – it's in Settings, voice and the car)
+            Spacer(Modifier.weight(1f))
+            Text("drive", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { Drive.set(ctx, true); vm.screen = Screen.DRIVE }.padding(vertical = 12.dp))
+            Spacer(Modifier.weight(1f))
             Text("apps  ⌃", color = Fg, fontSize = 17.sp, modifier = Modifier.combinedClickable { vm.screen = Screen.DRAWER }.padding(12.dp))
         }
     }

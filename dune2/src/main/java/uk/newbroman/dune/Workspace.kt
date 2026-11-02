@@ -217,6 +217,14 @@ fun AiSettings(vm: LauncherVM) {
     OutlinedTextField(model, { model = it; Brain.setModel(act, it) }, label = { Text("Model (blank = ${p.defaultModel})") },
         singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
     if (p.id == "openrouter") Note("Free OpenRouter models (ending :free) may keep what you send. Use a paid model for your messages.")
+    run {
+        var web by remember { mutableStateOf(Brain.webOn(act)) }
+        Row(Modifier.fillMaxWidth().combinedClickable { web = !web; Brain.setWeb(act, web) }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Let it search the web", color = Fg, fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Switch(checked = web, onCheckedChange = null)
+        }
+        Note("Uses the AI service's own web search (OpenAI, OpenRouter, Claude, or Google Search for Gemini) when a question needs current facts – e.g. “when is high tide at Llanddwyn”. Each search costs a little extra on your AI account; answers show the pages used.")
+    }
     ShareToggle("Let it read my messages and emails", "aiMessages", Brain.shareMessages(act))
     ShareToggle("Let it read my tasks", "aiTasks", Brain.shareTasks(act))
     ShareToggle("Let it read my calendar", "aiCalendar", Brain.shareCalendar(act))

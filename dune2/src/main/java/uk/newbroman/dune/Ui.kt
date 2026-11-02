@@ -279,7 +279,15 @@ internal fun AssistantBlock(vm: LauncherVM) {
     }
     vm.assistantReply?.let {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
-            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null })
+            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList() })
+        // The web pages it used: tap to open.
+        if (vm.assistantSources.isNotEmpty()) FlowRow(Modifier.padding(top = 4.dp)) {
+            vm.assistantSources.forEach { (title, url) ->
+                Chip("↗ " + title.take(28).ifBlank { android.net.Uri.parse(url).host ?: "source" }) {
+                    act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+                }
+            }
+        }
     }
     if (!Brain.ready(act)) vm.assistantFallback?.let { f ->
         FlowRow(Modifier.padding(top = 6.dp)) {
