@@ -180,6 +180,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     fun <T> keep(key: String, init: () -> T): androidx.compose.runtime.MutableState<T> =
         kept.getOrPut(key) { mutableStateOf<Any?>(init()) } as androidx.compose.runtime.MutableState<T>
 
+    /** Settings should open at this section (from the app search). */
+    var settingsJump by mutableStateOf<String?>(null)
     /** What the Shop comparison is searching for. */
     var shopQuery by mutableStateOf("")
     var gisImport by mutableStateOf<List<android.net.Uri>?>(null)

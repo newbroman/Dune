@@ -305,7 +305,7 @@ object HomeHub : Hub {
                 Text("Make Dune your home app  →", color = Sand, fontSize = 15.sp,
                     modifier = Modifier.padding(top = 16.dp).combinedClickable { Actions.homeSettings(ctx) })
             }
-            item { ClockBlock(vm) }
+            item { ClockBlock(vm); NextUpLine(vm) }
             if (s.showAssistant.value) item { AssistantBlock(vm) }
             // One line from each hub; tap to go there.
             item {

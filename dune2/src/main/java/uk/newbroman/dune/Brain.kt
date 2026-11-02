@@ -181,6 +181,28 @@ object Brain {
     }
 
     /** Next two weeks of events, or null if Dune may not read the calendar. */
+    /** The next thing in your calendar today or tomorrow: (start, title, all-day), or null. */
+    fun nextEvent(ctx: Context): Triple<Long, String, Boolean>? {
+        if (ctx.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return null
+        val now = System.currentTimeMillis()
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+            android.content.ContentUris.appendId(it, now - 12 * 3600_000L); android.content.ContentUris.appendId(it, now + 36 * 3600_000L)
+        }.build()
+        return runCatching {
+            ctx.contentResolver.query(uri, arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
+                CalendarContract.Instances.ALL_DAY), null, null, CalendarContract.Instances.BEGIN + " ASC")?.use { c ->
+                var allDay: Triple<Long, String, Boolean>? = null
+                while (c.moveToNext()) {
+                    val begin = c.getLong(1); val end = c.getLong(2); val day = c.getInt(3) == 1
+                    val title = c.getString(0) ?: "(no title)"
+                    if (day) { if (allDay == null && end > now) allDay = Triple(begin, title, true); continue }
+                    if (end > now) return@use Triple(begin, title, false)   // on now, or the next one
+                }
+                allDay
+            }
+        }.getOrNull()
+    }
+
     fun calendar(ctx: Context): List<String>? {
         if (ctx.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return null
         val from = System.currentTimeMillis() - 24 * 3600_000L

@@ -50,6 +50,7 @@ val SETTINGS_INDEX: List<Pair<String, String>> = listOf(
     "Turn on “Dune split screen” (needed on most phones)" to "Workspaces (two apps side by side)",
     "Share the split-screen log" to "Workspaces (two apps side by side)",
     "Show workspaces on the home screen" to "Workspaces (two apps side by side)",
+    "Backup" to "Backup",
     "Coinbase" to "Coinbase",
     "Coinbase key" to "Coinbase",
     "crypto" to "Coinbase",

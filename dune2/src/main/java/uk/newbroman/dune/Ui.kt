@@ -552,6 +552,16 @@ fun DrawerScreen(vm: LauncherVM) {
                         modifier = Modifier.fillMaxWidth().combinedClickable { go(); query = "" }.padding(vertical = 10.dp))
                 }
             }
+            // Settings that match, e.g. "wake" → "MAC address for Wake (L14)".
+            if (q.length >= 3) {
+                val words = query.trim().lowercase().split(Regex("\\s+"))
+                SETTINGS_INDEX.filter { (label, sec) -> (label + " " + sec).lowercase().let { t -> words.all { it in t } } }.take(4).forEachIndexed { i, (label, sec) ->
+                    item(key = "set$i") {
+                        Text("⚙ $label  ·  ${sec.substringBefore(" (")}", color = Dim, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().combinedClickable { vm.settingsJump = sec; vm.screen = Screen.SETTINGS; query = "" }.padding(vertical = 10.dp))
+                    }
+                }
+            }
             if (q.isNotEmpty()) item {
                 Text(
                     "Search the web for “${query.trim()}”", color = Dim, fontSize = 17.sp,
@@ -612,6 +622,8 @@ fun SettingsScreen(vm: LauncherVM) {
         query = ""   // back to the full list, then scroll once it's laid out
         heads[sec]?.let { i -> scope.launch { kotlinx.coroutines.delay(80); list.scrollToItem(i) } }
     }
+    // Opened from the app search on a setting: go straight to its section.
+    LaunchedEffect(vm.settingsJump) { vm.settingsJump?.let { sec -> vm.settingsJump = null; kotlinx.coroutines.delay(150); jump(sec) } }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         Text("←  Settings", color = Fg, fontSize = 22.sp,
@@ -725,6 +737,9 @@ fun SettingsScreen(vm: LauncherVM) {
                 act.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, lg), "Split-screen log")) } }
         }
         item { Toggle("Show workspaces on the home screen", s.showWorkspaces) }
+
+        section("Backup")
+        item { BackupSettings(act as MainActivity) }
 
         section("Coinbase")
         item { CoinbaseSettings(vm) }
@@ -1247,4 +1262,84 @@ private class Counting(private val d: androidx.compose.foundation.lazy.LazyListS
     override fun items(count: Int, key: ((Int) -> Any)?, contentType: (Int) -> Any?, itemContent: @Composable androidx.compose.foundation.lazy.LazyItemScope.(Int) -> Unit) { n += count; d.items(count, key, contentType, itemContent) }
     /** A section heading that the jump row and search can scroll to. */
     fun section(title: String) { heads[title] = n; item(key = "sec:$title") { Header(title) } }
+}
+
+/** Save everything to a file in Downloads/Dune, or put it back from one (e.g. after a reinstall or a new phone). */
+@Composable
+private fun BackupSettings(act: MainActivity) {
+    val scope = rememberCoroutineScope()
+    var pw by remember { mutableStateOf("") }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var restoring by remember { mutableStateOf<android.net.Uri?>(null) }
+    var needsPw by remember { mutableStateOf(false) }
+    Note("A backup holds your settings, hubs, tasks, notes, groups, scenes, shops, map layers, survey and tracks. " +
+        "With a password it also holds your saved keys (AI, tado, TP-Link, Tuya, GitHub, L14, Coinbase), encrypted with it. Keep the file somewhere safe, e.g. Google Drive.")
+    if (restoring == null) {
+        androidx.compose.material3.OutlinedTextField(pw, { pw = it }, label = { Text("Password for the saved keys (optional)") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        LinkRow("Save a backup to Downloads/Dune") {
+            msg = "Saving…"
+            scope.launch {
+                runCatching { Backup.export(act, pw.ifBlank { null }) }
+                    .onSuccess { (u, s) -> msg = "Saved: $s"; Gis.share(act, u, "application/zip", "Keep the Dune backup") }
+                    .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; msg = "Couldn't save: ${it.message}" }
+            }
+        }
+        LinkRow("Restore from a backup…") {
+            act.pickFiles(multiple = false) { uris ->
+                val u = uris.firstOrNull() ?: return@pickFiles
+                scope.launch { needsPw = runCatching { Backup.hasKeys(act, u) }.getOrDefault(false); restoring = u; msg = null }
+            }
+        }
+    } else {
+        Note("Restoring replaces Dune's current settings with the backup's, then Dune restarts." +
+            if (needsPw) " This backup has saved keys – enter its password to restore them too (or leave it blank to skip them)." else "")
+        if (needsPw) androidx.compose.material3.OutlinedTextField(pw, { pw = it }, label = { Text("Backup password") }, singleLine = true,
+            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
+        Row {
+            Chip("restore now") {
+                val u = restoring ?: return@Chip
+                msg = "Restoring…"
+                scope.launch {
+                    runCatching { Backup.restore(act, u, pw.ifBlank { null }) }
+                        .onSuccess { s ->
+                            act.toast(s + " – restarting Dune")
+                            kotlinx.coroutines.delay(1200)
+                            act.startActivity(Intent.makeRestartActivityTask(android.content.ComponentName(act, MainActivity::class.java)))
+                            Runtime.getRuntime().exit(0)
+                        }
+                        .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it; msg = it.message }
+                }
+            }
+            Chip("cancel") { restoring = null; msg = null }
+        }
+    }
+    msg?.let { Note(it) }
+}
+
+/** "Next: 14:30 Dentist · in 2 h" under the clock, from your calendar (once Dune may read it). */
+@Composable
+internal fun NextUpLine(vm: LauncherVM) {
+    val ctx = LocalContext.current
+    val next by produceState<Triple<Long, String, Boolean>?>(null, vm.resumeTick) {
+        while (true) {
+            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Brain.nextEvent(ctx) }
+            delay(60_000)
+        }
+    }
+    val n = next ?: return
+    val now = System.currentTimeMillis()
+    val mins = ((n.first - now) / 60_000).toInt()
+    val time = java.text.SimpleDateFormat(if (vm.store.clock24.value) "HH:mm" else "h:mm a", java.util.Locale.UK).format(java.util.Date(n.first))
+    val whenS = when {
+        n.third -> "today"
+        mins <= 0 -> "now"
+        mins < 60 -> "in $mins min"
+        mins < 24 * 60 && java.util.Calendar.getInstance().apply { timeInMillis = n.first }.get(java.util.Calendar.DAY_OF_YEAR) ==
+            java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR) -> "$time · in ${mins / 60} h" + (if (mins % 60 >= 15) " ${mins % 60} min" else "")
+        else -> "tomorrow $time"
+    }
+    Text("Next: ${n.second} · $whenS", color = if (mins in 0..30 && !n.third) Sand else Dim, fontSize = 15.sp, maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth().combinedClickable { Actions.openCalendar(ctx) }.padding(top = 4.dp, bottom = 2.dp))
 }
