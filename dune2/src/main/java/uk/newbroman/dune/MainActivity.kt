@@ -312,11 +312,10 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
-    /** Web pages kept alive (Rozmowa, Tongues, the well logger) stop their timers while you're in another app. */
+    /** Web pages kept alive (Rozmowa, Tongues, the well logger) pause while you're in another app. */
     override fun onPause() {
         super.onPause()
         listOfNotNull(rozmowaWeb, clozeWeb, wellsWeb).forEach { it.view.onPause() }
-        (rozmowaWeb ?: clozeWeb ?: wellsWeb)?.view?.pauseTimers()
     }
 
     override fun onResume() {
@@ -325,6 +324,5 @@ class MainActivity : ComponentActivity() {
         vm.media.listen()   // notification access may have just been granted
         WakeWord.sync(this)   // in the car: start the wake word now Dune is on screen (it can't start from the background)
         listOfNotNull(rozmowaWeb, clozeWeb, wellsWeb).forEach { it.view.onResume() }
-        (rozmowaWeb ?: clozeWeb ?: wellsWeb)?.view?.resumeTimers()
     }
 }

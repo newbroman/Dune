@@ -166,7 +166,7 @@ object Coinbase {
         val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, secret()) }
         val plain = JSONObject().put("name", key.name).put("pem", key.pem).toString().toByteArray()
         val blob = c.iv + c.doFinal(plain)
-        p.edit().putString("cb", Base64.encodeToString(blob, Base64.NO_WRAP)).apply()
+        p.edit().putString("cb", Base64.encodeToString(blob, Base64.NO_WRAP)).commit()
     }
 
     fun load(ctx: Context): ApiKey? = runCatching {

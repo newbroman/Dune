@@ -70,12 +70,30 @@ object Backup {
         e.commit()
     }
 
+    /** Home-screen widget ids only mean something on the phone that made them. */
+    private val NOT_RESTORED = setOf("widgets", "weatherWidget", "weatherPage")
+
+    /** A new file in Downloads/Dune to write the backup into, streamed (map layers can be large). */
+    private fun newDownload(ctx: Context, name: String): Pair<Uri, java.io.OutputStream> {
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            val v = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name); put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/zip")
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/Dune")
+            }
+            val u = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v) ?: throw IllegalStateException("Couldn't make the file")
+            return u to (ctx.contentResolver.openOutputStream(u) ?: throw IllegalStateException("Couldn't write the file"))
+        }
+        val f = File(File(Gis.dir(ctx), "exports").apply { mkdirs() }, name)
+        return androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f) to f.outputStream()
+    }
+
     /** Writes the backup; returns where it went and a one-line summary. */
     suspend fun export(ctx: Context, password: String?): Pair<Uri, String> = withContext(Dispatchers.IO) {
-        val out = ByteArrayOutputStream()
-        var files = 0; var secrets = 0
-        ZipOutputStream(out).use { z ->
-            fun put(name: String, bytes: ByteArray) { z.putNextEntry(ZipEntry(name)); z.write(bytes); z.closeEntry() }
+        var files = 0; var secrets = 0; val skipped = ArrayList<String>()
+        val name = "Dune-backup-" + java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.UK).format(java.util.Date()) + ".zip"
+        val (u, os) = newDownload(ctx, name)
+        ZipOutputStream(os.buffered()).use { z ->
+            fun put(n: String, bytes: ByteArray) { z.putNextEntry(ZipEntry(n)); z.write(bytes); z.closeEntry() }
             put("dune.json", JSONObject().put("version", 1).put("made", System.currentTimeMillis())
                 .put("prefs", prefsJson(ctx.getSharedPreferences(PREFS, 0).all)).toString(1).toByteArray())
             if (!password.isNullOrEmpty()) {
@@ -88,14 +106,14 @@ object Backup {
                 put("keys.sealed", seal(s.toString().toByteArray(), password))
             }
             FILES.map { File(ctx.filesDir, it) }.filter { it.exists() }.forEach { root ->
-                root.walkTopDown().filter { it.isFile && it.length() < MAX_FILE }.forEach { f ->
-                    put("files/" + f.relativeTo(ctx.filesDir).path, f.readBytes()); files++
+                root.walkTopDown().filter { it.isFile }.forEach { f ->
+                    if (f.length() > MAX_FILE) { skipped += f.name; return@forEach }
+                    z.putNextEntry(ZipEntry("files/" + f.relativeTo(ctx.filesDir).path)); f.inputStream().use { it.copyTo(z) }; z.closeEntry(); files++
                 }
             }
         }
-        val name = "Dune-backup-" + java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.UK).format(java.util.Date()) + ".zip"
-        val u = Gis.saveExport(ctx, name, "application/zip", out.toByteArray()) ?: throw IllegalStateException("Couldn't save to Downloads")
-        u to "$name · settings, $files files" + (if (secrets > 0) ", $secrets saved keys (password-protected)" else ", no saved keys")
+        u to "$name · settings, $files files" + (if (secrets > 0) ", $secrets saved keys (password-protected)" else ", no saved keys") +
+            (if (skipped.isNotEmpty()) " – left out (over 30 MB): " + skipped.joinToString(", ") else "")
     }
 
     /** Is there a password-protected keys part in this backup? */
@@ -105,39 +123,48 @@ object Backup {
         }
     }
 
+    private fun allowed(path: String) = !path.contains("..") && FILES.any { path == it || path.startsWith("$it/") }
+
     /** Replaces Dune's settings and files with the backup's. Dune restarts afterwards. */
     suspend fun restore(ctx: Context, uri: Uri, password: String?): String = withContext(Dispatchers.IO) {
+        // First pass: the small parts, so nothing is changed if the file or password is wrong.
         var prefs: JSONObject? = null; var sealed: ByteArray? = null
-        val files = HashMap<String, ByteArray>()
         ZipInputStream(ctx.contentResolver.openInputStream(uri) ?: throw IllegalStateException("Can't open that file")).use { z ->
             generateSequence { z.nextEntry }.forEach { e ->
-                val bytes = z.readBytes()
-                when {
-                    e.name == "dune.json" -> prefs = JSONObject(String(bytes)).getJSONObject("prefs")
-                    e.name == "keys.sealed" -> sealed = bytes
-                    e.name.startsWith("files/") && !e.name.contains("..") -> files[e.name.removePrefix("files/")] = bytes
+                when (e.name) {
+                    "dune.json" -> prefs = JSONObject(String(z.readBytes())).getJSONObject("prefs")
+                    "keys.sealed" -> sealed = z.readBytes()
                 }
             }
         }
         val p = prefs ?: throw IllegalStateException("That isn't a Dune backup")
-        // Check the password before changing anything.
         val keys = sealed?.let { s ->
             if (password.isNullOrEmpty()) null
             else runCatching { JSONObject(String(open(s, password))) }.getOrElse { throw IllegalStateException("Wrong password for the saved keys") }
         }
+        NOT_RESTORED.forEach { p.remove(it) }
         restorePrefs(ctx, p)
-        files.forEach { (path, bytes) ->
-            val f = File(ctx.filesDir, path)
-            if (f.canonicalPath.startsWith(ctx.filesDir.canonicalPath + File.separator)) { f.parentFile?.mkdirs(); f.writeBytes(bytes) }
+        // Second pass: files, straight to disk.
+        var files = 0
+        ZipInputStream(ctx.contentResolver.openInputStream(uri)!!).use { z ->
+            generateSequence { z.nextEntry }.forEach { e ->
+                val path = e.name.removePrefix("files/")
+                if (!e.name.startsWith("files/") || e.isDirectory || !allowed(path)) return@forEach
+                val f = File(ctx.filesDir, path)
+                if (!f.canonicalPath.startsWith(ctx.filesDir.canonicalPath + File.separator)) return@forEach
+                f.parentFile?.mkdirs(); f.outputStream().use { z.copyTo(it) }; files++
+            }
         }
         keys?.let { k ->
             k.keys().forEach { name ->
                 if (name == "cb") k.getJSONObject("cb").let { Coinbase.save(ctx, Coinbase.ApiKey(it.getString("name"), it.getString("pem"))) }
                 else Secure.put(ctx, name, k.getString(name))
             }
-            // Flags that say a key exists live in the plain settings; make them match.
-            Brain.PROVIDERS.forEach { pr -> ctx.getSharedPreferences(PREFS, 0).edit().putBoolean("aiHasKey_" + pr.id, Secure.get(ctx, "ai_" + pr.id) != null).apply() }
         }
-        "Restored settings and ${files.size} files" + (keys?.let { ", ${it.length()} saved keys" } ?: if (sealed != null) " (keys skipped – no password)" else "")
+        // The "a key is saved" flags must match the keys actually on this phone, password or not.
+        val e = ctx.getSharedPreferences(PREFS, 0).edit()
+        Brain.PROVIDERS.forEach { pr -> e.putBoolean("aiHasKey_" + pr.id, Secure.get(ctx, "ai_" + pr.id) != null) }
+        e.commit()
+        "Restored settings and $files files" + (keys?.let { ", ${it.length()} saved keys" } ?: if (sealed != null) " (keys skipped – no password)" else "")
     }
 }

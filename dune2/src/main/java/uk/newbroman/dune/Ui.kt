@@ -72,6 +72,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -119,8 +121,11 @@ fun DuneApp(vm: LauncherVM) {
         Surface(Modifier.fillMaxSize(), color = if (seeThrough) androidx.compose.ui.graphics.Color.Transparent else Bg) {
             // The hubs stay alive underneath every other screen, so opening the app list or Settings
             // doesn't rebuild them (and the map, music watcher and pages keep their state).
+            val focus = androidx.compose.ui.platform.LocalFocusManager.current
+            LaunchedEffect(vm.screen) { if (vm.screen != Screen.HOME) focus.clearFocus(force = true) }   // no typing into a hidden ask bar
             androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
-            HubScreen(vm)
+            androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().then(
+                if (vm.screen != Screen.HOME) Modifier.clearAndSetSemantics { } else Modifier)) { HubScreen(vm) }
             Crossfade(vm.screen, label = "screen") {
                 if (it != Screen.HOME) androidx.compose.foundation.layout.Box(Modifier.fillMaxSize().background(Bg)
                     .then(Modifier.pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } })) {
@@ -623,7 +628,11 @@ fun SettingsScreen(vm: LauncherVM) {
         heads[sec]?.let { i -> scope.launch { kotlinx.coroutines.delay(80); list.scrollToItem(i) } }
     }
     // Opened from the app search on a setting: go straight to its section.
-    LaunchedEffect(vm.settingsJump) { vm.settingsJump?.let { sec -> vm.settingsJump = null; kotlinx.coroutines.delay(150); jump(sec) } }
+    LaunchedEffect(vm.settingsJump) {
+        val sec = vm.settingsJump ?: return@LaunchedEffect
+        scope.launch { kotlinx.coroutines.delay(150); jump(sec) }   // (clearing the request below restarts this effect)
+        vm.settingsJump = null
+    }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
         Text("←  Settings", color = Fg, fontSize = 22.sp,
@@ -786,7 +795,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Field("MAC address for Wake (optional)", s.l14Mac) }
         item {
             Note("Warnings (backups, services, disk, NRG jobs) come from l14-status on the L14. " +
-                "Get its token on the L14 with:  l14-status.py token   Leave the token blank to turn warnings off.")
+                "Get its token on the L14 with:  l14-status.py token   Remove the token to turn warnings off.")
             Field("Status port", s.l14StatusPort, number = true)
             run {
                 var have by remember { mutableStateOf(vm.l14Token().isNotEmpty()) }
@@ -1317,27 +1326,38 @@ private fun BackupSettings(act: MainActivity) {
     msg?.let { Note(it) }
 }
 
-/** "Next: 14:30 Dentist · in 2 h" under the clock, from your calendar (once Dune may read it). */
+/** "Next: Dentist · 14:30 · in 2 h" under the clock, from your calendar (once Dune may read it). */
 @Composable
 internal fun NextUpLine(vm: LauncherVM) {
     val ctx = LocalContext.current
-    val next by produceState<Triple<Long, String, Boolean>?>(null, vm.resumeTick) {
-        while (true) {
-            value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Brain.nextEvent(ctx) }
-            delay(60_000)
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    val showing = vm.screen == Screen.HOME && vm.currentHub == "home"
+    // (time checked, next event): refreshed each minute, only while Home is on screen and Dune is in front.
+    val state by produceState<Pair<Long, Triple<Long, String, Boolean>?>>(0L to null, vm.resumeTick, showing) {
+        if (!showing) return@produceState
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+            while (true) {
+                value = System.currentTimeMillis() to kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { Brain.nextEvent(ctx) }
+                delay(60_000 - System.currentTimeMillis() % 60_000)
+            }
         }
     }
-    val n = next ?: return
-    val now = System.currentTimeMillis()
+    val now = state.first.takeIf { it > 0 } ?: return
+    val n = state.second ?: return
+    val zone = java.time.ZoneId.systemDefault()
+    val today = java.time.LocalDate.now(zone)
+    // All-day events are stored as midnight UTC.
+    val date = java.time.Instant.ofEpochMilli(n.first).atZone(if (n.third) java.time.ZoneOffset.UTC else zone).toLocalDate()
+    val dayWord = when (date) { today -> "today"; today.plusDays(1) -> "tomorrow"
+        else -> date.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.UK)) }
     val mins = ((n.first - now) / 60_000).toInt()
     val time = java.text.SimpleDateFormat(if (vm.store.clock24.value) "HH:mm" else "h:mm a", java.util.Locale.UK).format(java.util.Date(n.first))
     val whenS = when {
-        n.third -> "today"
-        mins <= 0 -> "now"
-        mins < 60 -> "in $mins min"
-        mins < 24 * 60 && java.util.Calendar.getInstance().apply { timeInMillis = n.first }.get(java.util.Calendar.DAY_OF_YEAR) ==
-            java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR) -> "$time · in ${mins / 60} h" + (if (mins % 60 >= 15) " ${mins % 60} min" else "")
-        else -> "tomorrow $time"
+        n.third -> dayWord
+        mins <= 0 -> "on now"
+        mins < 60 -> "$time · in $mins min"
+        date == today -> "$time · in ${mins / 60} h" + (if (mins % 60 >= 15) " ${mins % 60} min" else "")
+        else -> "$dayWord $time"
     }
     Text("Next: ${n.second} · $whenS", color = if (mins in 0..30 && !n.third) Sand else Dim, fontSize = 15.sp, maxLines = 1,
         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,

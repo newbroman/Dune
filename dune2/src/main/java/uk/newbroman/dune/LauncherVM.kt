@@ -233,8 +233,10 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         webIcons[w.url]?.let { return it }
         // Decoding the saved icon is file work: do it off the main thread, then redraw.
         if (webIconLoading.add(w.url)) viewModelScope.launch {
-            val b = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { WebApps.icon(ctx, w) }.getOrNull() }
-            if (b != null) { webIcons[w.url] = b; webIconsVersion++ }
+            try {
+                val b = kotlinx.coroutines.withContext(Dispatchers.IO) { runCatching { WebApps.icon(ctx, w) }.getOrNull() }
+                if (b != null) { webIcons[w.url] = b; webIconsVersion++ }
+            } finally { webIconLoading.remove(w.url) }   // (so a later redraw can try again, e.g. once icons are downloaded)
         }
         return null
     }
@@ -283,14 +285,15 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     init {
         Hubs.introduceNew(store)
+        l14Token()   // move an old plain-text L14 token into encrypted storage now, whether or not the L14 line is shown
         viewModelScope.launch { coinbaseKey = kotlinx.coroutines.withContext(Dispatchers.IO) { Coinbase.load(app) } }   // a Keystore decrypt: not at start-up
         la.registerCallback(cb, Handler(Looper.getMainLooper()))
         loadApps()
         Drive.init(app)
         viewModelScope.launch {
             webApps = WebApps.all(app)
-            WebApps.ensureIcons(app, webApps + PORTFOLIO_APP); webIcons.clear(); webIconsVersion++
-            if (WebApps.refresh(app)) { webApps = WebApps.all(app); webIcons.clear(); webIconsVersion++ }
+            WebApps.ensureIcons(app, webApps + PORTFOLIO_APP); webIcons.clear(); webIconLoading.clear(); webIconsVersion++
+            if (WebApps.refresh(app)) { webApps = WebApps.all(app); webIcons.clear(); webIconLoading.clear(); webIconsVersion++ }
         }
         viewModelScope.launch {
             phrases = Phrases.all(app)
@@ -525,12 +528,14 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     fun addWeatherPageWidget() { widgetTarget = "weatherPage"; screen = Screen.WIDGET_PICK }
 
     fun goHome() {
+        val wasHome = screen == Screen.HOME
         if (screen == Screen.SETTINGS) afterSettings()
         assistantFallback = null
         widgetTarget = null
         // While driving, Home returns to the Drive screen.
         screen = if (Drive.active.value && screen != Screen.DRIVE) Screen.DRIVE else Screen.HOME
-        resumeTick++; homeTick++
+        // Home pressed on the hubs: back to the Home hub. Coming back from Settings or the app list: stay on the hub you were on.
+        resumeTick++; if (wasHome) homeTick++
     }
     /** Bumped by Home and Back only: the pager returns to the middle page. Coming back from an app
      *  (onResume) leaves you on the page you left from – e.g. the map after opening a map app. */
@@ -611,7 +616,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     /** The L14 status token, kept encrypted (moved out of the plain settings, which Android backs up). */
     fun l14Token(): String {
         val old = store.l14StatusToken.value.trim()
-        if (old.isNotEmpty()) { Secure.put(ctx, "l14Token", old); store.l14StatusToken.set("") }
+        if (old.isNotEmpty()) { Secure.put(ctx, "l14Token", old); if (Secure.get(ctx, "l14Token") == old) store.l14StatusToken.set("") }
         return Secure.get(ctx, "l14Token").orEmpty()
     }
 

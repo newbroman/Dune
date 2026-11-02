@@ -172,9 +172,10 @@ object ConnectHub : Hub {
                         val ip = w?.ip
                         if (ip == null || w.connected.not()) { act.toast("Join a Wi-Fi network first"); return@Chip }
                         if (scanState != null) return@Chip
-                        vm.longScope.launch {   // keeps going if you swipe away
+                        vm.longScope.launch(kotlinx.coroutines.CoroutineExceptionHandler { _, e ->   // keeps going if you swipe away; never crashes Dune
+                            android.util.Log.w("Dune", "connect: $e"); scanState = null; outsideState = null; if (speed?.endsWith("…") == true) speed = null }) {
                             scanState = "scanning…"
-                            val announced = async { Net.announce(act) }
+                            val announced = async { Net.announce(act.applicationContext) }
                             val found = Net.scan(ip, w.prefix) { d, n -> scanState = "scanning… ${d * 100 / n}%" }
                             val names = announced.await()
                             // Merge what devices announced about themselves with what answered the knock.
@@ -187,8 +188,8 @@ object ConnectHub : Hub {
                             hosts = all.sortedBy { it.ip.split('.').last().toIntOrNull() ?: 0 }
                             val net = w.ssid ?: (w.gateway ?: "this network")
                             withContext(Dispatchers.IO) {
-                                fresh = Scanner.newSince(Scanner.history(act).firstOrNull { it.network == net }, hosts)
-                                Scanner.save(act, net, hosts)
+                                fresh = Scanner.newSince(Scanner.history(act.applicationContext).firstOrNull { it.network == net }, hosts)
+                                Scanner.save(act.applicationContext, net, hosts)
                             }
                             scanState = null
                         }
@@ -203,7 +204,8 @@ object ConnectHub : Hub {
                         val home = prefs.getString("homePublicIp", null)
                         if (home == null) { act.toast("Open this hub once on your home Wi-Fi first, so Dune knows its public address"); return@Chip }
                         if (wifi?.connected == true) { act.toast("Turn Wi-Fi off and use mobile data: Dune then checks $home from outside, as an attacker would"); return@Chip }
-                        vm.longScope.launch {   // keeps going if you swipe away
+                        vm.longScope.launch(kotlinx.coroutines.CoroutineExceptionHandler { _, e ->   // keeps going if you swipe away; never crashes Dune
+                            android.util.Log.w("Dune", "connect: $e"); scanState = null; outsideState = null; if (speed?.endsWith("…") == true) speed = null }) {
                             outsideState = "checking $home…"
                             outsideResult = Scanner.outside(home) { p -> outsideState = "checking… $p%" }
                             outsideState = null
@@ -222,7 +224,7 @@ object ConnectHub : Hub {
                     }
                 }
                 if (showHistory) {
-                    val hist by produceState(emptyList<ScanRecord>(), showHistory) { value = withContext(Dispatchers.IO) { Scanner.history(act) } }
+                    val hist by produceState(emptyList<ScanRecord>(), showHistory) { value = withContext(Dispatchers.IO) { Scanner.history(act.applicationContext) } }
                     if (hist.isEmpty()) Note("No scans yet.")
                     hist.forEachIndexed { i, r ->
                         val prev = hist.drop(i + 1).firstOrNull { it.network == r.network }
@@ -273,7 +275,8 @@ object ConnectHub : Hub {
                     Chip(speed ?: "speed test") {
                         if (speed?.endsWith("…") == true) return@Chip
                         speed = "testing…"
-                        vm.longScope.launch {   // keeps going if you swipe away
+                        vm.longScope.launch(kotlinx.coroutines.CoroutineExceptionHandler { _, e ->   // keeps going if you swipe away; never crashes Dune
+                            android.util.Log.w("Dune", "connect: $e"); scanState = null; outsideState = null; if (speed?.endsWith("…") == true) speed = null }) {
                             val r = Net.speed { speed = it }
                             speed = r?.let { (m, p) -> "%.0f Mbps down · %d ms".format(m, p) } ?: "speed test failed"
                         }

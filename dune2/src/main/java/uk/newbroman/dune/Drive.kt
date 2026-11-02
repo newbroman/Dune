@@ -103,7 +103,8 @@ object Drive {
     fun fromDune(ctx: Context, i: Intent) = i.getStringExtra("key") == key(ctx)
 
     /** Drive mode starts by itself only for Bluetooth devices with "car" in their name (Car Audio, MyCar, CAR-KIT…). */
-    fun isCarName(name: String?) = name != null && Regex("(?i)(^|[^a-z])car($|[^a-z])|car(audio|kit|play|stereo|link|media|multimedia)|[a-z]car($|[^a-z])").containsMatchIn(name)
+    fun isCarName(name: String?) = name != null && (Regex("(?i)(^|[^a-z])car($|[^a-z])|car(audio|kit|play|stereo|link|media|multimedia)").containsMatchIn(name)
+        || Regex("[a-z]Car($|[^a-z])").containsMatchIn(name))   // "MyCar", but not "Oscar"
 
     /** Car connected: switch on, then open the Drive screen (or offer it as a notification). */
     fun carConnected(ctx: Context) {
@@ -152,8 +153,11 @@ class CarReceiver : BroadcastReceiver() {
         else @Suppress("DEPRECATION") intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
         dev ?: return
         val store = Store.get(ctx)
-        val name = if (Drive.hasBtPermission(ctx)) runCatching { @Suppress("MissingPermission") dev.name }.getOrNull() else null
-        if (!store.driveAuto.value || !Drive.isCarName(name)) return
+        // The device's own name, or the name you gave it in Android's Bluetooth settings (Android 11+).
+        val names = if (Drive.hasBtPermission(ctx)) listOfNotNull(
+            runCatching { @Suppress("MissingPermission") dev.name }.getOrNull(),
+            if (Build.VERSION.SDK_INT >= 30) runCatching { @Suppress("MissingPermission") dev.alias }.getOrNull() else null) else emptyList()
+        if (!store.driveAuto.value || names.none { Drive.isCarName(it) }) return
         when (intent.action) {
             BluetoothDevice.ACTION_ACL_CONNECTED -> Drive.carConnected(ctx)
             BluetoothDevice.ACTION_ACL_DISCONNECTED -> Drive.set(ctx, false)

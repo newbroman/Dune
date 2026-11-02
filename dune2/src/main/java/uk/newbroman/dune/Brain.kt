@@ -39,7 +39,7 @@ object Secure {
         if (value.isNullOrBlank()) { p.edit().remove(name).apply(); return }
         runCatching {
             val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, secret("dune-$name")) }
-            p.edit().putString(name, Base64.encodeToString(c.iv + c.doFinal(value.toByteArray()), Base64.NO_WRAP)).apply()
+            p.edit().putString(name, Base64.encodeToString(c.iv + c.doFinal(value.toByteArray()), Base64.NO_WRAP)).commit()   // (written at once: a restore restarts Dune straight after)
         }
     }
 
@@ -181,24 +181,27 @@ object Brain {
     }
 
     /** Next two weeks of events, or null if Dune may not read the calendar. */
-    /** The next thing in your calendar today or tomorrow: (start, title, all-day), or null. */
+    /** The next thing in your calendar: (start, title, all-day); an event already on only if nothing else starts soon. */
     fun nextEvent(ctx: Context): Triple<Long, String, Boolean>? {
         if (ctx.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) return null
         val now = System.currentTimeMillis()
         val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
             android.content.ContentUris.appendId(it, now - 12 * 3600_000L); android.content.ContentUris.appendId(it, now + 36 * 3600_000L)
         }.build()
+        // Only calendars you show, and not invitations you've declined.
+        val where = "${CalendarContract.Instances.VISIBLE} = 1 AND ${CalendarContract.Instances.SELF_ATTENDEE_STATUS} != ${CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED}"
         return runCatching {
             ctx.contentResolver.query(uri, arrayOf(CalendarContract.Instances.TITLE, CalendarContract.Instances.BEGIN, CalendarContract.Instances.END,
-                CalendarContract.Instances.ALL_DAY), null, null, CalendarContract.Instances.BEGIN + " ASC")?.use { c ->
-                var allDay: Triple<Long, String, Boolean>? = null
+                CalendarContract.Instances.ALL_DAY), where, null, CalendarContract.Instances.BEGIN + " ASC")?.use { c ->
+                var allDay: Triple<Long, String, Boolean>? = null; var ongoing: Triple<Long, String, Boolean>? = null
                 while (c.moveToNext()) {
                     val begin = c.getLong(1); val end = c.getLong(2); val day = c.getInt(3) == 1
                     val title = c.getString(0) ?: "(no title)"
                     if (day) { if (allDay == null && end > now) allDay = Triple(begin, title, true); continue }
-                    if (end > now) return@use Triple(begin, title, false)   // on now, or the next one
+                    if (begin >= now) return@use if (ongoing != null && begin - now > 3 * 3600_000L) ongoing else Triple(begin, title, false)
+                    if (end > now && ongoing == null) ongoing = Triple(begin, title, false)
                 }
-                allDay
+                ongoing ?: allDay
             }
         }.getOrNull()
     }
