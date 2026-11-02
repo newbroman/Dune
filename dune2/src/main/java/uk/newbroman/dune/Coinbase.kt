@@ -162,7 +162,7 @@ object Coinbase {
 
     fun save(ctx: Context, key: ApiKey?) {
         val p = ctx.getSharedPreferences("dune-secure", Context.MODE_PRIVATE)
-        if (key == null) { p.edit().clear().apply(); return }
+        if (key == null) { p.edit().remove("cb").apply(); return }   // only the Coinbase key – other secrets share this file
         val c = Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.ENCRYPT_MODE, secret()) }
         val plain = JSONObject().put("name", key.name).put("pem", key.pem).toString().toByteArray()
         val blob = c.iv + c.doFinal(plain)

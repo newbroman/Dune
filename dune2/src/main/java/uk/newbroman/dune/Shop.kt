@@ -231,6 +231,8 @@ fun ShopScreen(vm: LauncherVM) {
                     if (u.scheme == "http" || u.scheme == "https") return false
                     runCatching {
                         val i = if (u.scheme == "intent") Intent.parseUri(u.toString(), Intent.URI_INTENT_SCHEME) else Intent(Intent.ACTION_VIEW, u)
+                        // A web page may only open apps the way a browser would – never a named part of an app (or of Dune).
+                        i.addCategory(Intent.CATEGORY_BROWSABLE); i.component = null; i.selector = null
                         act.tryStart(i)
                     }
                     return true
