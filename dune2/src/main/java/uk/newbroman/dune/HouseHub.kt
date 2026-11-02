@@ -67,10 +67,13 @@ object HouseHub : Hub {
         val plugs = remember(vm.resumeTick) { Plugs.saved(ctx) }
         val states = remember(vm.resumeTick) { Plugs.lastStates(ctx) }
         if (t == null && plugs.isEmpty()) return null
+        val switchable = plugs.filter { states.containsKey(it.ip) }
         val warm = t?.zones?.filter { it.type == "HEATING" && it.inside != null }?.joinToString(" · ") { "${it.name} ${deg(it.inside)}" }
         val on = plugs.count { states[it.ip] == true }
-        return listOfNotNull(warm?.ifBlank { null }, if (t?.away == true) "away" else null,
-            if (plugs.isNotEmpty()) "$on of ${plugs.size} on" else null).joinToString("  ·  ")
+        val sensors = remember(vm.resumeTick) { Plugs.lastReadings(ctx) }.filterValues { it.contains("°") }.entries.take(2)
+            .joinToString(" · ") { (n, r) -> n + " " + r.substringBefore(" ·") }
+        return listOfNotNull(warm?.ifBlank { null }, sensors.ifBlank { null }, if (t?.away == true) "away" else null,
+            if (switchable.isNotEmpty()) "$on of ${switchable.size} on" else null).joinToString("  ·  ")
     }
 
     @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) {
@@ -211,7 +214,8 @@ object HouseHub : Hub {
                     Chip(if (Tuya.keys(act) != null) "Tuya ✓" else "+ Tuya / Smart Life") { setup = if (setup == "tuya") null else "tuya" }
                 }
                 plugMsg?.let { Note(it) }
-                if (plugs.isNotEmpty()) Note("Tap a name to rename it; long-press to remove it from this list. WiZ lights need nothing set up – just “find”.")
+                if (plugs.isNotEmpty()) Note("Tap a name to rename it; long-press to remove it from this list. WiZ lights need nothing set up – just “find”. Pull ↻ at the top for fresh sensor readings.")
+                if (plugs.any { it.kind == "tuya" && it.readings == null && it.on == null }) Note("A Tuya sensor showing nothing: on platform.tuya.com open your project › Devices › All Devices › … › hover the sensor's product › Change Control Instruction Mode › DP Instruction › Save, then Refresh Configuration. Tuya can take a few hours to pass it on.")
                 when (setup) {
                     "tplink" -> if (hasAccount) LinkRow("Forget the TP-Link account") { Plugs.setAccount(act, null, null); hasAccount = false; setup = null } else {
                         var u by remember { mutableStateOf("") }; var pw by remember { mutableStateOf("") }
@@ -320,12 +324,13 @@ object HouseHub : Hub {
         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).combinedClickable(onClick = rename, onLongClick = forget)) {
-                    Text((if (p.bulb) "💡 " else "") + p.name, color = Fg, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text((if (p.bulb) "💡 " else if (p.on == null && p.readings != null) "◉ " else "") + p.name, color = Fg, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    p.readings?.let { Text(it, color = Sand, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
                     Text(p.error?.let { "⚠ $it" } ?: listOfNotNull(when (p.kind) { "wiz" -> "WiZ"; "tuya" -> "Tuya"; "tapo" -> p.model.ifBlank { "Tapo" }; else -> p.model.ifBlank { "Kasa" } },
                         p.level?.takeIf { p.on == true }?.let { "$it%" }, p.watts?.let { String.format(Locale.UK, "%.0f W", it) }).joinToString(" · "),
                         color = if (p.error != null) Color(0xFFFF8A80) else Dim, fontSize = 12.sp, maxLines = 1)
                 }
-                Switch(checked = p.on == true, onCheckedChange = { set(it) }, enabled = p.error == null || p.on != null)
+                if (p.on != null || p.readings == null) Switch(checked = p.on == true, onCheckedChange = { set(it) }, enabled = p.error == null || p.on != null)
             }
             // Brightness, sent when you let go.
             if (p.level != null && p.on == true) {

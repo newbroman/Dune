@@ -41,3 +41,14 @@ class TuyaSignTest {
     @Test fun commandRequest() = assertEquals("17E1D26BEE9F589B0831A244229BD8F79F642ABF0CA0B82C3FBDF25369F22444",
         Tuya.sign("abc123", "s3cr3t", "tok9", 1700000000000, "POST", "/v1.0/iot-03/devices/d1/commands", """{"commands":[{"code":"switch_1","value":true}]}"""))
 }
+
+class TuyaReadingsTest {
+    @Test fun climateSensor() = assertEquals("21.5° · 54% humid · battery 80%",
+        TuyaReadings.describe(mapOf("va_temperature" to 215, "va_humidity" to 54, "battery_percentage" to 80), false))
+    @Test fun tenthsHumidity() = assertEquals("19.0° · 55% humid", TuyaReadings.describe(mapOf("temp_current" to 190, "humidity_value" to 550), false))
+    @Test fun doorAndMotion() {
+        assertEquals("open · battery 90%", TuyaReadings.describe(mapOf("doorcontact_state" to true, "battery_percentage" to 90), false))
+        assertEquals("motion · battery low", TuyaReadings.describe(mapOf("pir" to "pir", "battery_state" to "low"), false))
+    }
+    @Test fun unknownCodesShownRaw() = assertEquals("foo bar 3", TuyaReadings.describe(mapOf("foo_bar" to 3, "switch_1" to true), false))
+}

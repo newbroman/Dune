@@ -171,7 +171,9 @@ object Klap {
  * or "tuya" (ip is "tuya:<device id>"; reached through Tuya's cloud). [level] is brightness in %.
  */
 data class Plug(val ip: String, val name: String, val model: String, val kind: String, val bulb: Boolean = false,
-                val on: Boolean? = null, val watts: Double? = null, val error: String? = null, val level: Int? = null)
+                val on: Boolean? = null, val watts: Double? = null, val error: String? = null, val level: Int? = null,
+                /** Sensor readings, ready to show: "21.5° · 54% · battery 80%". */
+                val readings: String? = null)
 
 // ======================================================================= WiZ lights: plain JSON over UDP, no account
 
@@ -298,8 +300,11 @@ object Tuya {
         val level = (m["bright_value_v2"] as? Number)?.let { ((it.toInt() - 10) * 100 / 990).coerceIn(1, 100) }
             ?: (m["bright_value"] as? Number)?.let { ((it.toInt() - 25) * 100 / 230).coerceIn(1, 100) }
         val cat = d.optString("category")
-        return Plug("tuya:" + d.getString("id"), d.optString("name", "Tuya device"), cat, "tuya", bulb = cat in setOf("dj", "dd", "fwd", "xdd", "dc"),
-            on = on, level = level, error = if (!d.optBoolean("online", true)) "offline" else if (on == null) "can't be switched from here" else null,
+        val isLight = cat in setOf("dj", "dd", "fwd", "xdd", "dc")
+        val readings = TuyaReadings.describe(m, isLight).ifBlank { null }
+        return Plug("tuya:" + d.getString("id"), d.optString("name", "Tuya device"), cat, "tuya", bulb = isLight,
+            on = on, level = if (isLight) level else null, readings = readings,
+            error = if (!d.optBoolean("online", true)) "offline" else if (on == null && readings == null) "nothing to show yet – see the note below" else null,
             watts = (m["cur_power"] as? Number)?.toDouble()?.div(10))
     }
     fun read(ctx: Context, p: Plug): Plug {
@@ -339,8 +344,14 @@ object Plugs {
         JSONObject(prefs(ctx).getString("plugStates", "{}")).let { o -> o.keys().asSequence().associateWith { o.getBoolean(it) } }
     }.getOrDefault(emptyMap())
     private fun keepStates(ctx: Context, list: List<Plug>) {
-        val o = JSONObject(); list.forEach { p -> p.on?.let { o.put(p.ip, it) } }; prefs(ctx).edit().putString("plugStates", o.toString()).apply()
+        val o = JSONObject(); list.forEach { p -> p.on?.let { o.put(p.ip, it) } }
+        val r = JSONObject(); list.forEach { p -> p.readings?.let { r.put(p.name, it) } }
+        prefs(ctx).edit().putString("plugStates", o.toString()).putString("plugReadings", r.toString()).apply()
     }
+    /** Last sensor readings by device name, for Home's summary. */
+    fun lastReadings(ctx: Context): Map<String, String> = runCatching {
+        JSONObject(prefs(ctx).getString("plugReadings", "{}")).let { o -> o.keys().asSequence().associateWith { o.getString(it) } }
+    }.getOrDefault(emptyMap())
 
     private fun session(ctx: Context, ip: String): Klap.Session? {
         synchronized(sessions) { sessions[ip]?.takeIf { it.fresh }?.let { return it } }
@@ -689,5 +700,37 @@ object Scenes {
             plugJobs.awaitAll()
         }
         problems.distinct().takeIf { it.isNotEmpty() }?.joinToString("; ")
+    }
+}
+
+/**
+ * Turns a Tuya device's status codes into readable readings. Tuya's standard codes come in tenths
+ * for some sensors and whole numbers for others, so values out of a sensible range are scaled down.
+ */
+object TuyaReadings {
+    private fun num(v: Any?) = (v as? Number)?.toDouble() ?: (v as? String)?.toDoubleOrNull()
+    private fun temp(v: Any?) = num(v)?.let { var t = it; while (t > 70 || t < -40) t /= 10.0; String.format(java.util.Locale.UK, "%.1f°", t) }
+    private fun pct(v: Any?) = num(v)?.let { var h = it; while (h > 100) h /= 10.0; "${h.toInt()}%" }
+
+    fun describe(m: Map<String, Any?>, isLight: Boolean): String {
+        val out = ArrayList<String>()
+        fun has(vararg k: String) = k.firstOrNull { m.containsKey(it) && m[it] != null }
+        has("va_temperature", "temp_current", "temperature", "temp_indoor", "local_temp")?.let { k -> temp(m[k])?.let { out += it } }
+        has("va_humidity", "humidity_value", "humidity", "humidity_indoor")?.let { k -> pct(m[k])?.let { out += "$it humid" } }
+        has("doorcontact_state", "door_state")?.let { k -> out += if (m[k] == true || m[k] == "open" || m[k] == "1") "open" else "shut" }
+        has("pir", "presence_state", "pir_state")?.let { k -> out += if (m[k].toString() in setOf("pir", "presence", "true", "1", "motion")) "motion" else "no motion" }
+        has("watersensor_state", "water_leak")?.let { k -> out += if (m[k].toString() in setOf("alarm", "true", "1")) "⚠ water!" else "dry" }
+        has("smoke_sensor_status", "smoke_sensor_state")?.let { k -> out += if (m[k].toString() in setOf("alarm", "1", "true")) "⚠ smoke!" else "no smoke" }
+        has("co2_value")?.let { k -> num(m[k])?.let { out += "CO₂ ${it.toInt()} ppm" } }
+        has("pm25_value")?.let { k -> num(m[k])?.let { out += "PM2.5 ${it.toInt()}" } }
+        if (!isLight) has("bright_value", "illuminance_value")?.let { k -> num(m[k])?.let { out += "${it.toInt()} lux" } }
+        has("cur_voltage")?.let { k -> num(m[k])?.let { out += String.format(java.util.Locale.UK, "%.0f V", if (it > 1000) it / 10 else it) } }
+        has("add_ele")?.let { k -> num(m[k])?.let { out += String.format(java.util.Locale.UK, "%.2f kWh", it / 1000) } }
+        has("battery_percentage", "va_battery", "battery", "residual_electricity")?.let { k -> pct(m[k])?.let { out += "battery $it" } }
+            ?: has("battery_state")?.let { k -> out += "battery ${m[k]}" }
+        // Nothing recognised (e.g. a device in "DP instruction" mode): show its first few values as they come.
+        if (out.isEmpty()) m.entries.filter { it.value != null && it.key !in setOf("switch_led", "switch_1", "switch", "switch_on") }.take(4)
+            .forEach { (k, v) -> out += k.replace('_', ' ') + " " + v.toString().take(12) }
+        return out.joinToString(" · ")
     }
 }
