@@ -7,7 +7,8 @@ import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 
-data class Task(val id: Long, val text: String, val done: Boolean)
+/** A task; [project] is the Claude project it belongs to (by name), if any. */
+data class Task(val id: Long, val text: String, val done: Boolean, val project: String? = null)
 data class Note(val id: Long, val text: String, val time: Long)
 
 /** A "Label | command" line from settings. */
@@ -247,10 +248,11 @@ class Store private constructor(ctx: Context) {
     private fun saveTasks(l: List<Task>) {
         tasks = l
         val a = JSONArray()
-        l.forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("done", it.done)) }
+        l.forEach { a.put(JSONObject().put("id", it.id).put("text", it.text).put("done", it.done).apply { it.project?.let { p -> put("project", p) } }) }
         p.edit().putString("tasks", a.toString()).apply()
     }
-    fun addTask(text: String) { if (text.isNotBlank()) saveTasks(tasks + Task(System.currentTimeMillis(), text.trim(), false)) }
+    fun addTask(text: String, project: String? = null) { if (text.isNotBlank()) saveTasks(tasks + Task(System.currentTimeMillis(), text.trim(), false, project)) }
+    fun setTaskProject(id: Long, project: String?) = saveTasks(tasks.map { if (it.id == id) it.copy(project = project) else it })
     fun toggleTask(id: Long) = saveTasks(tasks.map { if (it.id == id) it.copy(done = !it.done) else it })
     fun deleteTask(id: Long) = saveTasks(tasks.filterNot { it.id == id })
     fun clearDone() = saveTasks(tasks.filterNot { it.done })
@@ -290,7 +292,7 @@ class Store private constructor(ctx: Context) {
     private fun readTasks(): List<Task> = try {
         val a = JSONArray(p.getString("tasks", "[]"))
         (0 until a.length()).map { a.getJSONObject(it) }
-            .map { Task(it.getLong("id"), it.getString("text"), it.getBoolean("done")) }
+            .map { Task(it.getLong("id"), it.getString("text"), it.getBoolean("done"), it.optString("project").ifBlank { null }) }
     } catch (e: Exception) { emptyList() }
 
     private fun readList(k: String) = (p.getString(k, "") ?: "").split('\n').filter { it.isNotBlank() }

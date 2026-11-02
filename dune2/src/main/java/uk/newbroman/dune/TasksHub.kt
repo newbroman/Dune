@@ -45,7 +45,10 @@ object TasksHub : Hub {
     @Composable override fun summary(vm: LauncherVM): String {
         val open = vm.store.tasks.filter { !it.done }
         val notes = vm.store.notes.size
-        val t = if (open.isEmpty()) "No open tasks" else "${open.size} task" + (if (open.size == 1) "" else "s") + " · next: " + open.first().text
+        val c = androidx.compose.ui.platform.LocalContext.current
+        val repo = remember(vm.resumeTick) { RepoTasks.cached(c)?.second?.count { !it.done } ?: 0 }
+        val t = (if (open.isEmpty()) "No open tasks" else "${open.size} task" + (if (open.size == 1) "" else "s") + " · next: " + open.first().text) +
+            (if (repo > 0) " · $repo in project repos" else "")
         return if (notes > 0) "$t · $notes note" + (if (notes == 1) "" else "s") else t
     }
 
@@ -73,7 +76,7 @@ object TasksHub : Hub {
                     }.padding(8.dp))
                 }
             }
-            if (tab == "tasks") item { TasksBlock(s) }
+            if (tab == "tasks") item { ProjectTasksBlock(vm) }
             else {
                 item { NoteEditor(null, "", onSave = { s.saveNote(null, it) }) }
                 s.notes.forEach { n -> item(key = "n${n.id}") { NoteCard(vm, n) } }
