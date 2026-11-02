@@ -59,7 +59,7 @@ object LearnHub : Hub {
         val ctx = LocalContext.current
         val s = ClozeStats.parse(ctx.getSharedPreferences("dune", 0).getString("clozeSummary", null)) ?: return null
         val due = s.due.values.sum()
-        return (if (due > 0) "$due sentences to review" else "Cloze: all caught up") + (if (s.streak > 0) " · 🔥 ${s.streak}" else "") +
+        return (if (due > 0) "$due sentences to review" else "Tongues: all caught up") + (if (s.streak > 0) " · 🔥 ${s.streak}" else "") +
             (if (s.today > 0) " · ${s.today} pts today" else "")
     }
 
