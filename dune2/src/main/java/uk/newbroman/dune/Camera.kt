@@ -152,9 +152,19 @@ object Lenses {
     }.getOrDefault(false)
 }
 
+private const val LAPSE = "lapse"
 private const val PHOTO = "photo"; private const val VIDEO = "video"; private const val PANO = "pano"; private const val SPHERE = "360"
 
-/** Dune's own camera: photo, video, panorama and 360 photo sphere; lenses, macro, self-timer, tap to focus, pinch to zoom. */
+/** Holds a running time-lapse between the camera screen and its frame thread. */
+class LapseRun {
+    @Volatile var enc: TimeLapseEncoder? = null
+    @Volatile var nextAt = 0L
+    var running by mutableStateOf(false)
+    var frames by mutableIntStateOf(0)
+    var since by mutableLongStateOf(0L)
+}
+
+/** Dune's own camera: photo, video, time-lapse, panorama and 360 photo sphere; lenses, zoom, macro, self-timer, tap to focus. */
 @SuppressLint("MissingPermission", "ClickableViewAccessibility")
 @Composable
 fun CameraScreen(vm: LauncherVM) {
@@ -171,7 +181,7 @@ fun CameraScreen(vm: LauncherVM) {
 
     val prefs = remember { act.getSharedPreferences("dune", 0) }
     var mode by rememberSaveable { mutableStateOf(if (vm.cameraVideo) VIDEO else PHOTO) }
-    val video = mode == VIDEO; val pano = mode == PANO || mode == SPHERE
+    val video = mode == VIDEO; val pano = mode == PANO || mode == SPHERE; val lapseMode = mode == LAPSE
     var back by rememberSaveable { mutableStateOf(true) }
     var flash by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
     var timer by remember { mutableIntStateOf(prefs.getInt("camTimer", 0)) }
@@ -186,6 +196,10 @@ fun CameraScreen(vm: LauncherVM) {
     var countdown by remember { mutableIntStateOf(0) }
     var countJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
+    var every by remember { mutableIntStateOf(prefs.getInt("lapseEvery", 2)) }
+    val lapse = remember { LapseRun() }
+    val rot = remember { intArrayOf(Surface.ROTATION_0) }
+    var zoom by remember { mutableFloatStateOf(1f) }; var zMin by remember { mutableFloatStateOf(1f) }; var zMax by remember { mutableFloatStateOf(1f) }
 
     val mainLens = lenses.firstOrNull()
     val macroLens = remember(lenses) { Lenses.macro(lenses, mainLens) }
@@ -216,7 +230,7 @@ fun CameraScreen(vm: LauncherVM) {
                 if (o == ORIENTATION_UNKNOWN) return
                 val r = when (o) { in 45..134 -> Surface.ROTATION_270; in 135..224 -> Surface.ROTATION_180
                     in 225..314 -> Surface.ROTATION_90; else -> Surface.ROTATION_0 }
-                imageCapture.targetRotation = r; videoCapture.targetRotation = r
+                imageCapture.targetRotation = r; videoCapture.targetRotation = r; rot[0] = r
             }
         }
         l.enable(); onDispose { l.disable() }
@@ -232,7 +246,7 @@ fun CameraScreen(vm: LauncherVM) {
                 p.unbindAll()
                 val pre = androidx.camera.core.Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
                 val sel = when { !usingBack -> CameraSelector.DEFAULT_FRONT_CAMERA; lensId != null -> Lenses.selector(lensId!!); else -> CameraSelector.DEFAULT_BACK_CAMERA }
-                cam = when { video -> p.bindToLifecycle(act, sel, pre, videoCapture); pano -> p.bindToLifecycle(act, sel, pre, analysis)
+                cam = when { video -> p.bindToLifecycle(act, sel, pre, videoCapture); pano || lapseMode -> p.bindToLifecycle(act, sel, pre, analysis)
                              else -> p.bindToLifecycle(act, sel, pre, imageCapture) }
             }.onFailure { act.toast("Camera unavailable: ${it.message}"); if (lensId != null) { lensId = null; macro = false } }
         }, ContextCompat.getMainExecutor(act))
@@ -241,6 +255,13 @@ fun CameraScreen(vm: LauncherVM) {
     // close-focus on the main camera when there's no separate macro camera
     LaunchedEffect(cam, macro, pv.locked) { Lenses.apply(cam, macro && macroLens == null && !pano, pano && pv.locked) }
     DisposableEffect(Unit) { onDispose { recording?.stop() } }
+    // the zoom the camera is at, and how far it goes
+    DisposableEffect(cam) {
+        val c = cam ?: return@DisposableEffect onDispose { }
+        val obs = androidx.lifecycle.Observer<androidx.camera.core.ZoomState> { zoom = it.zoomRatio; zMin = it.minZoomRatio; zMax = it.maxZoomRatio }
+        c.cameraInfo.zoomState.observe(act, obs)
+        onDispose { c.cameraInfo.zoomState.removeObserver(obs) }
+    }
 
     // tap to focus, pinch to zoom
     LaunchedEffect(Unit) {
@@ -313,6 +334,7 @@ fun CameraScreen(vm: LauncherVM) {
     }
     DisposableEffect(pano) {
         if (!pano) return@DisposableEffect onDispose { }
+        analysis.targetRotation = Surface.ROTATION_0
         val before = act.requestedOrientation
         act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         val sm = act.getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -352,8 +374,62 @@ fun CameraScreen(vm: LauncherVM) {
         if (pv.active && pv.targets.isNotEmpty() && pv.shots.size >= pv.targets.size) finishPano()
     }
 
+    // ---- time-lapse: a frame every few seconds, straight into a video
+    val stopLapse: () -> Unit = {
+        val e = lapse.enc
+        lapse.enc = null; lapse.running = false
+        if (e != null) worker.execute {
+            val f = runCatching { e.finish() }.getOrNull()
+            val u = f?.let { runCatching { TimeLapse.save(act, it) }.getOrNull() }
+            act.runOnUiThread {
+                if (u != null) { last = u; Gallery.changed.value++; act.toast("Time-lapse saved – ${e.frames} frames") }
+                else act.toast("Time-lapse not saved (no frames)")
+            }
+        }
+    }
+    DisposableEffect(lapseMode) {
+        if (!lapseMode) return@DisposableEffect onDispose { }
+        analysis.setAnalyzer(worker) { img ->
+            val e = lapse.enc
+            val now = System.currentTimeMillis()
+            if (e != null && now >= lapse.nextAt) {
+                lapse.nextAt = maxOf(lapse.nextAt + every * 1000L, now + every * 500L)
+                runCatching {
+                    var bm = img.toBitmap()
+                    val deg = img.imageInfo.rotationDegrees
+                    if (deg != 0) bm = Bitmap.createBitmap(bm, 0, 0, bm.width, bm.height, Matrix().apply { postRotate(deg.toFloat()) }, true)
+                    e.add(bm); bm.recycle()
+                    val n = e.frames
+                    act.runOnUiThread { lapse.frames = n }
+                }.onFailure { act.runOnUiThread { act.toast("Time-lapse frame failed: ${it.message}") } }
+            }
+            img.close()
+        }
+        onDispose { analysis.clearAnalyzer(); if (lapse.enc != null) stopLapse() }
+    }
+    LaunchedEffect(lapse.running) {
+        if (lapse.running) act.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else act.window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+    val startLapse: () -> Unit = {
+        val r = rot[0]
+        analysis.targetRotation = r          // frames come upright for the way the phone is held now
+        val portrait = r == Surface.ROTATION_0 || r == Surface.ROTATION_180
+        lapse.running = true; lapse.frames = 0; lapse.since = System.currentTimeMillis()
+        worker.execute {
+            runCatching { TimeLapseEncoder.open(act, portrait) }
+                .onSuccess { lapse.nextAt = System.currentTimeMillis(); lapse.enc = it }
+                .onFailure { act.runOnUiThread { lapse.running = false; act.toast("Can't record a time-lapse: ${it.message}") } }
+        }
+    }
+
     val press: () -> Unit = {
         when {
+            lapseMode -> if (lapse.running) stopLapse() else if (countJob == null && timer == 0) startLapse() else if (countJob != null) { countJob?.cancel(); countJob = null; countdown = 0 }
+                else countJob = scope.launch {
+                    for (s in timer downTo 1) { countdown = s; runCatching { tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120) }; delay(1000) }
+                    countdown = 0; countJob = null; startLapse()
+                }
             pano -> when {
                 pv.stitching >= 0 -> {}
                 !pv.active -> {
@@ -393,6 +469,14 @@ fun CameraScreen(vm: LauncherVM) {
                 if (mode == PHOTO) TopChip(when (flash) { ImageCapture.FLASH_MODE_ON -> "⚡ on"; ImageCapture.FLASH_MODE_OFF -> "⚡ off"; else -> "⚡ auto" }, false) {
                     flash = when (flash) { ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON; ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_OFF; else -> ImageCapture.FLASH_MODE_AUTO }
                 }
+                if (lapseMode && !lapse.running) TopChip("every ${if (every < 60) "${every}s" else "1 min"}", true) {
+                    every = TimeLapse.INTERVALS[(TimeLapse.INTERVALS.indexOf(every) + 1) % TimeLapse.INTERVALS.size]; prefs.edit().putInt("lapseEvery", every).apply()
+                }
+                if (lapse.running) {
+                    val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
+                    val s = (now - lapse.since) / 1000; val v = lapse.frames / TimeLapseEncoder.FPS
+                    Text("● %d:%02d · %d frames → %d:%02d".format(s / 60, s % 60, lapse.frames, v / 60, v % 60), color = Color(0xFFFF5A5A), fontSize = 14.sp, modifier = Modifier.padding(8.dp))
+                }
                 if (recording != null) {
                     val now by produceState(System.currentTimeMillis()) { while (true) { delay(500); value = System.currentTimeMillis() } }
                     val s = (now - recStart) / 1000
@@ -401,22 +485,32 @@ fun CameraScreen(vm: LauncherVM) {
             }
             if (pano) PanoStatus(pv, mode == SPHERE)
             Spacer(Modifier.weight(1f))
-            // lenses (rear cameras the phone lets apps use)
-            if (usingBack && !pano && mainLens != null && lenses.size > 1 && !macro) {
-                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.Center) {
-                    lenses.filter { it.id != macroLens?.id }.sortedBy { -it.fovLong }.forEach { l ->
-                        val on = (lensId ?: mainLens.id) == l.id
-                        Text(Lenses.label(l, mainLens), color = if (on) Sand else Color.White, fontSize = 13.sp, modifier = Modifier
-                            .padding(horizontal = 4.dp).background(Color(0x66000000), CircleShape)
-                            .combinedClickable { if (recording == null) lensId = if (l.id == mainLens.id) null else l.id }.padding(horizontal = 10.dp, vertical = 6.dp))
+            // lenses (rear cameras the phone lets apps use) and zoom steps; pinch for anything in between
+            if (!pano) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                    @Composable fun pill(t: String, on: Boolean, click: () -> Unit) = Text(t, color = if (on) Sand else Color.White, fontSize = 13.sp, modifier = Modifier
+                        .padding(horizontal = 3.dp).background(Color(0x66000000), CircleShape).combinedClickable(onClick = click).padding(horizontal = 10.dp, vertical = 6.dp))
+                    if (usingBack && mainLens != null && lenses.size > 1 && !macro) {
+                        lenses.filter { it.id != macroLens?.id && it.id != mainLens.id }.sortedBy { -it.fovLong }.forEach { l ->
+                            pill(Lenses.label(l, mainLens), lensId == l.id) { if (recording == null && !lapse.running) lensId = l.id }
+                        }
                     }
+                    val steps = (listOfNotNull(zMin.takeIf { it < 0.95f }) + listOf(1f, 2f, 5f, 10f, 20f)).filter { it <= zMax + 0.01f }
+                    val match = steps.minByOrNull { abs(it - zoom) }?.takeIf { abs(it - zoom) < 0.05f }
+                    steps.forEach { z ->
+                        pill(fmtZoom(z), z == match) {
+                            if (lensId != null && !macro) lensId = null
+                            cam?.cameraControl?.setZoomRatio(z)
+                        }
+                    }
+                    if (match == null) Text(fmtZoom(zoom), color = Sand, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 6.dp))
                 }
             }
             Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center) {
-                listOf(PHOTO to "PHOTO", VIDEO to "VIDEO", PANO to "PANO", SPHERE to "360").forEach { (m, l) ->
+                listOf(PHOTO to "PHOTO", VIDEO to "VIDEO", LAPSE to "LAPSE", PANO to "PANO", SPHERE to "360").forEach { (m, l) ->
                     Text(l, color = if (mode == m) Sand else Color.White, fontSize = 14.sp, modifier = Modifier
-                        .combinedClickable { if (recording == null && !pv.active && pv.stitching < 0) { mode = m; countJob?.cancel(); countJob = null; countdown = 0 } }
-                        .padding(horizontal = 12.dp, vertical = 8.dp))
+                        .combinedClickable { if (recording == null && !lapse.running && !pv.active && pv.stitching < 0) { mode = m; countJob?.cancel(); countJob = null; countdown = 0 } }
+                        .padding(horizontal = 9.dp, vertical = 8.dp))
                 }
             }
             Row(Modifier.fillMaxWidth().padding(bottom = 28.dp, start = 28.dp, end = 28.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -426,18 +520,20 @@ fun CameraScreen(vm: LauncherVM) {
                     thumb?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
                 }
                 Spacer(Modifier.weight(1f))
-                val shutter = when { video -> Color(0xFFE53935); pano && pv.active -> Sand; else -> Color.White }
+                val shutter = when { video || lapseMode -> Color(0xFFE53935); pano && pv.active -> Sand; else -> Color.White }
                 Box(Modifier.size(78.dp).border(4.dp, Color.White, CircleShape).padding(7.dp)
-                    .background(shutter, if (recording != null || (pano && pv.active)) RoundedCornerShape(10.dp) else CircleShape)
+                    .background(shutter, if (recording != null || lapse.running || (pano && pv.active)) RoundedCornerShape(10.dp) else CircleShape)
                     .combinedClickable(onClick = press))
                 Spacer(Modifier.weight(1f))
                 Text(if (pano) "" else "⟲", color = Color.White, fontSize = 30.sp, modifier = Modifier.size(54.dp)
-                    .combinedClickable { if (recording == null && !pano) { back = !back; macro = false; lensId = null } }
+                    .combinedClickable { if (recording == null && !lapse.running && !pano) { back = !back; macro = false; lensId = null } }
                     .padding(top = 6.dp), textAlign = TextAlign.Center)
             }
         }
     }
 }
+
+private fun fmtZoom(z: Float) = if (z < 0.95f || abs(z - Math.round(z)) > 0.05f) String.format(java.util.Locale.UK, "%.1f×", z) else "${Math.round(z)}×"
 
 @Composable
 private fun TopChip(text: String, on: Boolean, onClick: () -> Unit) =
