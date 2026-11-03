@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -62,6 +63,37 @@ object Wells {
 
     /** Walking directions in Google Maps. */
     fun walkTo(w: Well) = "https://www.google.com/maps/dir/?api=1&destination=${w.lat},${w.lon}&travelmode=walking"
+}
+
+/**
+ * The Newborough QGIS project for QField. Dune keeps one copy of the packaged project (a .zip with the
+ * .qgs and its layers, or a lone .qgs/.qgz) and hands it to QField, which imports it into its
+ * "Imported projects". Once imported, QField reopens it by itself, so "Open QField" is all you need after.
+ */
+object QFieldProject {
+    private fun dir(ctx: Context) = java.io.File(ctx.filesDir, "qfield").apply { mkdirs() }
+    fun current(ctx: Context): java.io.File? = dir(ctx).listFiles()?.filter { it.isFile }?.maxByOrNull { it.lastModified() }
+    fun mime(f: java.io.File) = if (f.name.endsWith(".zip", true)) "application/zip" else "application/x-qgis"
+
+    /** Copies the picked file in (replacing the old one). Returns the saved file, or null if it isn't a project. */
+    suspend fun keep(ctx: Context, u: Uri): java.io.File? = withContext(Dispatchers.IO) {
+        val name = runCatching {
+            ctx.contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        }.getOrNull() ?: "Newborough.zip"
+        if (!Regex("(?i)\\.(zip|qgz|qgs)$").containsMatchIn(name)) return@withContext null
+        val safe = name.replace(Regex("[^A-Za-z0-9._ ()-]"), "_")
+        val tmp = java.io.File(dir(ctx), ".incoming")
+        ctx.contentResolver.openInputStream(u)?.use { i -> tmp.outputStream().use { i.copyTo(it) } } ?: return@withContext null
+        if (safe.endsWith(".zip", true) && !hasProject(tmp)) { tmp.delete(); return@withContext null }
+        dir(ctx).listFiles()?.filter { it.isFile && it != tmp }?.forEach { it.delete() }
+        java.io.File(dir(ctx), safe).also { tmp.renameTo(it) }
+    }
+    private fun hasProject(f: java.io.File) = runCatching {
+        java.util.zip.ZipFile(f).use { z -> z.entries().asSequence().any { Regex("(?i)\\.(qgs|qgz)$").containsMatchIn(it.name) } }
+    }.getOrDefault(false)
+
+    fun send(ctx: Context, f: java.io.File) = Gis.sendToQField(ctx,
+        androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f), mime(f))
 }
 
 /** Newborough Warren: the well logger, the wells on a map, the research tools, and the conditions on site. */
@@ -145,6 +177,28 @@ object NewboroughHub : Hub {
                     Tile("On Dune's map", "${wells.size} wells") { vm.mapShowWells = true; vm.jumpHub = "map" }
                 }
                 logged?.let { Note(it) }
+            }
+            item {
+                Section("QGIS project")
+                var proj by remember { mutableStateOf(QFieldProject.current(act)) }
+                val scope = androidx.compose.runtime.rememberCoroutineScope()
+                fun pick() = act.pickFiles(multiple = false) { us ->
+                    val u = us.firstOrNull() ?: return@pickFiles
+                    scope.launch {
+                        val f = QFieldProject.keep(act, u)
+                        if (f == null) act.toast("That isn't a QGIS project – pick the project .zip (with the .qgs inside), a .qgz or a .qgs")
+                        else { proj = f; act.toast("Saved – handing it to QField to import"); QFieldProject.send(act, f) }
+                    }
+                }
+                FlowRow {
+                    Tile("Open QField", if (Gis.hasQField(act)) "last project" else "get QField") { Gis.openQField(act) }
+                    Tile(if (proj == null) "Add project" else "Send to QField", proj?.name ?: "pick the .zip",
+                        onLong = { pick() }) { proj?.let { QFieldProject.send(act, it) } ?: pick() }
+                }
+                Note(if (proj == null) "Pick the packaged Newborough project (.zip with NEWBRO_dif.qgs and its layers) from Drive or Downloads. " +
+                    "Dune keeps a copy and sends it to QField, which imports it – after that “Open QField” goes straight back to it."
+                else "${proj!!.name} · ${String.format(Locale.UK, "%.1f MB", proj!!.length() / 1e6)}. Send it again after an update; long-press to pick a newer one. " +
+                    "In QField, readings you add stay in QField's copy.")
             }
             item {
                 Section("Nearest well")
