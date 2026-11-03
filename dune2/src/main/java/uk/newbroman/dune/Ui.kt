@@ -141,6 +141,7 @@ fun DuneApp(vm: LauncherVM) {
                     Screen.CLOZE -> ClozeFull()
                     Screen.WELLS -> WellsFull(vm)
                     Screen.SHOP -> ShopScreen(vm)
+                    Screen.OPEN -> OpenAppsScreen(vm)
                 }
                 }
             }

@@ -35,7 +35,7 @@ data class AppEntry(
 const val PORTFOLIO = "https://newbroman.github.io/"
 val PORTFOLIO_APP = WebApp("My GitHub apps", PORTFOLIO, "")
 
-enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE, WELLS, SHOP }
+enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, CAMERA, CLOZE, WELLS, SHOP, OPEN }
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
