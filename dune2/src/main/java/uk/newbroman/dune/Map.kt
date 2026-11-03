@@ -294,6 +294,15 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
         pendingLayers?.let { layers = it; pendingLayers = null; Gis.save(act, it) }
         if (ready[0]) web.evaluateJavascript("gisSetLayers(${Gis.toJs(layers)})", null)
     }
+    // "Wells on the map" from the Newborough hub: switch the wells layer on and zoom to it.
+    LaunchedEffect(vm.mapShowWells, layersLoaded) {
+        if (!vm.mapShowWells || !layersLoaded) return@LaunchedEffect
+        vm.mapShowWells = false
+        val l = if (layers.any { it.id == Gis.WELLS.id }) layers.map { if (it.id == Gis.WELLS.id) it.copy(on = true) else it } else layers + Gis.WELLS.copy(on = true)
+        setLayers(l)
+        if (source.site != null) show(MAP_SOURCES.first { it.id == "dark" })
+        web.postDelayed({ if (ready[0]) web.evaluateJavascript("gisZoom('${Gis.WELLS.id}')", null) }, if (ready[0]) 700 else 2500)
+    }
     LaunchedEffect(vm.gisImport, layersLoaded) {
         if (!layersLoaded) return@LaunchedEffect
         val u = vm.gisImport ?: return@LaunchedEffect

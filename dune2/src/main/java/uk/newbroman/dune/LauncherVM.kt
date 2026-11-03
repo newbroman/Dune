@@ -184,6 +184,9 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     fun <T> keep(key: String, init: () -> T): androidx.compose.runtime.MutableState<T> =
         kept.getOrPut(key) { mutableStateOf<Any?>(init()) } as androidx.compose.runtime.MutableState<T>
 
+    /** The hub the well logger was opened from, and whether the map should switch the wells layer on. */
+    var wellsFrom = "map"
+    var mapShowWells by mutableStateOf(false)
     /** Settings should open at this section (from the app search). */
     var settingsJump by mutableStateOf<String?>(null)
     /** What the Shop comparison is searching for. */
@@ -552,7 +555,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     fun back() {
         val from = screen
         if (screen != Screen.HOME) goHome() else if (homePage != HOME_PAGE) homeTick++
-        if (from == Screen.WELLS) jumpHub = "map"   // the well logger was opened from the map
+        if (from == Screen.WELLS) jumpHub = wellsFrom   // back to the hub the well logger was opened from
         if (from == Screen.SHOP) jumpHub = "shop"
     }
 

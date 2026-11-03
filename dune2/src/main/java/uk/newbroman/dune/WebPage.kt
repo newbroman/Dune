@@ -77,6 +77,7 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
             override fun onPageFinished(v: WebView, url: String?) {
                 loaded = true
                 whenLoaded.forEach { v.evaluateJavascript(it, null) }; whenLoaded.clear()
+                whenEval.forEach { (c, cb) -> v.evaluateJavascript(c) { cb(it) } }; whenEval.clear()
             }
         }
         loadUrl(home)
@@ -97,6 +98,14 @@ class SpeechWebView(private val act: MainActivity, private val home: String) {
     private val whenLoaded = ArrayList<String>()
     /** Runs some of the page's own JavaScript, waiting for the page to finish loading if need be. */
     fun runWhenLoaded(code: String) { main.post { if (loaded) view.evaluateJavascript(code, null) else whenLoaded += code } }
+    /** Runs JavaScript once the page has loaded and hands back its result (JSON text). */
+    fun eval(code: String, cb: (String?) -> Unit) {
+        main.post {
+            if (loaded) view.evaluateJavascript(code) { cb(it) }
+            else whenEval += code to cb
+        }
+    }
+    private val whenEval = ArrayList<Pair<String, (String?) -> Unit>>()
 
     private var lastReload = 0L
     private val heightCheck = Runnable { checkHeight(nudged = false) }

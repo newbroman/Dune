@@ -91,6 +91,8 @@ class MainActivity : ComponentActivity() {
     private var wellsWeb: SpeechWebView? = null
     /** The Newborough well logger, run inside Dune (its readings are kept in Dune's own web storage). */
     fun wells(): SpeechWebView = wellsWeb ?: SpeechWebView(this, SpeechWebView.WELLS).also { wellsWeb = it }
+    /** The well logger if it has been opened (without loading it just to look). */
+    fun wellsIfOpen(): SpeechWebView? = wellsWeb
 
     private var pickCallback: ((List<android.net.Uri>) -> Unit)? = null
     private val pickLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->

@@ -195,6 +195,7 @@ fun openWellLogger(vm: LauncherVM, act: MainActivity, well: String? = null, inst
         if (app != null) { vm.launch(app); return }
         act.toast("The well logger isn't installed from Chrome – opening it in Dune")
     }
+    vm.wellsFrom = vm.currentHub
     vm.screen = Screen.WELLS
     if (well != null) act.wells().runWhenLoaded("try{switchTab('log');selectWell(${org.json.JSONObject.quote(well.lowercase())})}catch(e){}")
 }
@@ -205,7 +206,7 @@ fun WellsFull(vm: LauncherVM) {
     val act = LocalContext.current as MainActivity
     Column(Modifier.fillMaxSize().background(Bg).systemBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("← map", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { vm.back() }.padding(10.dp))
+            Text("← back", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable { vm.back() }.padding(10.dp))
             Text("Well logger", color = Fg, fontSize = 15.sp, modifier = Modifier.weight(1f))
             Text("↻", color = Dim, fontSize = 16.sp, modifier = Modifier.combinedClickable { act.wells().view.reload() }.padding(10.dp))
         }
