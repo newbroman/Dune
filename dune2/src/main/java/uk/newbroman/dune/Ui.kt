@@ -172,6 +172,14 @@ internal fun rememberOverscrollGestures(up: () -> Unit, down: () -> Unit) = reme
 
 @Composable
 internal fun Header(text: String, trailing: String? = null, onTrailing: (() -> Unit)? = null) {
+    if (LocalFolded.current) {
+        // under a Home heading: just the action, if there is one
+        if (trailing != null) Row(Modifier.fillMaxWidth()) {
+            Spacer(Modifier.weight(1f))
+            Text(trailing, color = Dim, fontSize = 12.sp, modifier = Modifier.combinedClickable { onTrailing?.invoke() }.padding(4.dp))
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().padding(top = 28.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(text.uppercase(), color = Dim, fontSize = 12.sp, letterSpacing = 2.sp)
         Spacer(Modifier.weight(1f))

@@ -35,6 +35,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -113,7 +114,14 @@ fun HubScreen(vm: LauncherVM) {
     val s = vm.store
     val hubs = Hubs.enabled(s)
     val homeAt = Hubs.homeIndex(s)
-    val pager = rememberPagerState(initialPage = homeAt) { hubs.size }
+    // The hubs go round in a circle: past the last one comes the first again (lots of laps either way).
+    val n = hubs.size.coerceAtLeast(1)
+    val laps = if (n > 1) 2000 else 1
+    val base = (laps / 2) * n
+    val pager = rememberPagerState(initialPage = base + homeAt) { n * laps }
+    val real = pager.currentPage % n
+    /** The page showing hub [i] that's nearest to where the pager is now. */
+    fun nearest(i: Int): Int { val c = pager.currentPage - real + i; return listOf(c - n, c, c + n).filter { it in 0 until n * laps }.minBy { kotlin.math.abs(it - pager.currentPage) } }
     val scope = rememberCoroutineScope()
     val gestures = rememberOverscrollGestures(up = { vm.screen = Screen.DRAWER }, down = { Actions.expandNotifications(ctx) })
 
@@ -125,7 +133,7 @@ fun HubScreen(vm: LauncherVM) {
         SkyBackground(vm.skyLat, vm.skyLon, 0.9f, weather = if (s.skyWeather.value) vm.weather else null, heading = heading,
             animate = vm.screen == Screen.HOME && vm.currentHub == "home")
     }
-    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && pager.currentPage != homeAt) pager.animateScrollToPage(homeAt) }
+    LaunchedEffect(vm.homeTick) { if (vm.screen == Screen.HOME && real != homeAt) pager.animateScrollToPage(nearest(homeAt)) }
     // Keep an eye on what's playing (for Home's Music line and the recently-played list).
     androidx.compose.runtime.DisposableEffect(Unit) {
         vm.media.onTrack = { t, a, p -> PlayHistory.add(ctx, Played(t, a, p, System.currentTimeMillis())) }
@@ -135,28 +143,28 @@ fun HubScreen(vm: LauncherVM) {
     // If the list of hubs changes (an update adds one, or Settings), stay on the hub you were looking at.
     LaunchedEffect(hubs.joinToString { it.id }) {
         val i = hubs.indexOfFirst { it.id == vm.currentHub }
-        if (i >= 0 && i != pager.currentPage) pager.scrollToPage(i)
+        if (i >= 0 && i != real) pager.scrollToPage(base + i)
     }
-    LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(pager.currentPage)?.id ?: "home"; vm.homePage = if (pager.currentPage == homeAt) HOME_PAGE else -1 }
+    LaunchedEffect(pager.currentPage, hubs.size) { vm.currentHub = hubs.getOrNull(real)?.id ?: "home"; vm.homePage = if (real == homeAt) HOME_PAGE else -1 }
     LaunchedEffect(vm.jumpHub) {
         val id = vm.jumpHub ?: return@LaunchedEffect
         // Clearing the request restarts this effect, which would cancel a scroll still in progress
         // (it stopped one hub short). So the scroll runs in its own scope, outside this effect.
         vm.jumpHub = null
-        hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { i -> scope.launch { pager.animateScrollToPage(i) } }
+        hubs.indexOfFirst { it.id == id }.takeIf { it >= 0 }?.let { i -> scope.launch { pager.animateScrollToPage(nearest(i)) } }
             ?: ctx.toast("Add the ${Hubs.byId(id)?.title ?: id} hub in Settings › Hubs")
     }
 
     Column(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
-        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1, key = { hubs[it].id }) { page ->
-            hubs[page].Page(vm, active = pager.currentPage == page && vm.screen == Screen.HOME, gestures = gestures)
+        HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
+            hubs[page % n].Page(vm, active = pager.currentPage == page && vm.screen == Screen.HOME, gestures = gestures)
         }
         // The hub bar: one glyph per hub, tap to jump.
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically) {
             hubs.forEachIndexed { i, h ->
-                val on = pager.currentPage == i
-                Column(Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(i) } }.padding(horizontal = 10.dp, vertical = 4.dp),
+                val on = real == i
+                Column(Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(nearest(i)) } }.padding(horizontal = 10.dp, vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(h.glyph, color = if (on) Sand else Dim, fontSize = 18.sp)
                     Text(h.title.lowercase(), color = if (on) Sand else Faint, fontSize = 10.sp)
@@ -311,9 +319,10 @@ object HomeHub : Hub {
             }
             item { ClockBlock(vm); NextUpLine(vm) }
             if (s.showAssistant.value) item { AssistantBlock(vm) }
-            // One line from each hub; tap to go there.
-            item {
-                Column(Modifier.padding(top = 18.dp)) {
+            // Below Ask Dune: headings that open when touched (which are open is remembered).
+            // One line from each hub; tap a line to go there.
+            item { Fold(vm, "hubs", "Hubs") {
+                Column(Modifier.padding(top = 4.dp)) {
                     Hubs.enabled(s).filter { it.id != "home" }.forEach { h -> androidx.compose.runtime.key(h.id) {
                         val line = h.summary(vm)
                         if (line != null) Row(Modifier.fillMaxWidth().combinedClickable { vm.jumpHub = h.id }.padding(vertical = 7.dp),
@@ -323,13 +332,13 @@ object HomeHub : Hub {
                         }
                     } }
                 }
-            }
-            if (s.showPhrase.value) item { PhraseBlock(vm) }
-            if (s.showWeather.value) item { WeatherBlock(vm) }
-            if (s.showFavs.value) item { FavouritesBlock(vm) }
-            if (s.showWorkspaces.value) item { WorkspacesBlock(vm) }
-            if (s.showTermux.value) item { TermuxBlock(vm) }
-            if (s.showL14.value) item { L14Block(vm) }
+            } }
+            if (s.showPhrase.value && vm.phrase != null) item { Fold(vm, "phrase", "Phrase of the day") { PhraseBlock(vm) } }
+            if (s.showWeather.value) item { Fold(vm, "weather", "Weather", vm.weather?.let { "${it.temp}° ${it.summary}" }) { WeatherBlock(vm) } }
+            if (s.showFavs.value) item { Fold(vm, "favs", "Favourites") { FavouritesBlock(vm) } }
+            if (s.showWorkspaces.value && Workspaces.parse(s.workspaces.value).isNotEmpty()) item { Fold(vm, "workspaces", "Workspaces") { WorkspacesBlock(vm) } }
+            if (s.showTermux.value) item { Fold(vm, "termux", "Termux") { TermuxBlock(vm) } }
+            if (s.showL14.value) item { Fold(vm, "l14", "L14", s.l14Host.value.takeIf { it.isNotBlank() }?.let { l14Summary(vm.l14Online, vm.l14Status) }) { L14Block(vm) } }
             item { Spacer(Modifier.height(32.dp)) }
         }
     }
@@ -409,3 +418,26 @@ fun HubSettings(vm: LauncherVM) {
     }
 }
 
+
+/** Inside a folded section the blocks' own headings give way to the section heading (only their action stays). */
+val LocalFolded = androidx.compose.runtime.compositionLocalOf { false }
+
+/** A heading on Home that opens and closes its section when touched. */
+@Composable
+fun Fold(vm: LauncherVM, id: String, title: String, hint: String? = null, content: @Composable () -> Unit) {
+    val prefs = LocalContext.current.getSharedPreferences("dune", 0)
+    var open by remember { mutableStateOf(id in (prefs.getStringSet("homeOpen", null) ?: emptySet())) }
+    Row(Modifier.fillMaxWidth().combinedClickable {
+        open = !open
+        val now = (prefs.getStringSet("homeOpen", null) ?: emptySet()).toMutableSet().apply { if (open) add(id) else remove(id) }
+        prefs.edit().putStringSet("homeOpen", now).apply()
+    }.padding(top = 16.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(if (open) "▾" else "▸", color = Sand, fontSize = 15.sp, modifier = Modifier.padding(end = 10.dp))
+        Text(title, color = Fg, fontSize = 18.sp, modifier = Modifier.weight(1f))
+        if (!open && hint != null) Text(hint, color = Dim, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(start = 8.dp).widthIn(max = 180.dp))
+    }
+    if (open) androidx.compose.runtime.CompositionLocalProvider(LocalFolded provides true) {
+        Column(Modifier.padding(start = 25.dp, bottom = 4.dp)) { content() }
+    }
+}
