@@ -14,8 +14,8 @@ android {
         applicationId = "uk.newbroman.dune2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 40
-        versionName = "2.36"
+        versionCode = 41
+        versionName = "2.37"
         // phones only: keeps the wake-word engine's native code from tripling the APK
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -64,6 +64,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     // Record hub: the built-in camera
     val camerax = "1.4.1"
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.camera:camera-core:$camerax")
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
