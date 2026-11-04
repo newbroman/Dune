@@ -126,21 +126,25 @@ object Actions {
 
     // ---------- Termux ----------
 
-    /** Run [command] in a new visible Termux session. Blank command just opens Termux. */
-    fun termux(act: Activity, command: String) {
+    /**
+     * Run [command] in a new visible Termux session. Blank command just opens Termux.
+     * Where Termux can't be driven (Google Play build, or Dune's permission refused) [paste] – by default the
+     * command itself – goes on the clipboard and Termux opens for you to paste it.
+     */
+    fun termux(act: Activity, command: String, paste: String = command) {
         if (!act.isInstalled(TERMUX)) { act.toast("Termux isn't installed"); return }
         if (command.isBlank()) { act.launchPackage(TERMUX); return }
         if (!termuxSupportsRunCommand(act)) {
             // Google Play Termux has no RUN_COMMAND: copy the command and open Termux to paste it.
             val cm = act.getSystemService(android.content.ClipboardManager::class.java)
-            cm?.setPrimaryClip(android.content.ClipData.newPlainText("Termux command", command))
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("Termux command", paste))
             act.toast("Command copied – long-press in Termux, Paste, Enter")
             act.launchPackage(TERMUX)
             return
         }
         if (act.checkSelfPermission(TERMUX_PERMISSION) != PackageManager.PERMISSION_GRANTED) {
             (act as? MainActivity)?.requestPerm(TERMUX_PERMISSION) { ok ->
-                if (ok) termux(act, command) else {
+                if (ok) termux(act, command, paste) else {
                     act.toast("Allow \"Run commands in Termux environment\" for Dune")
                     appSettings(act)
                 }
@@ -160,7 +164,10 @@ object Actions {
             // Bring Termux forward ourselves so it works without its "display over other apps" permission.
             Handler(Looper.getMainLooper()).postDelayed({ act.launchPackage(TERMUX) }, 400)
         } catch (e: SecurityException) {
-            act.toast("Termux refused: set allow-external-apps = true in ~/.termux/termux.properties")
+            val cm = act.getSystemService(android.content.ClipboardManager::class.java)
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("Termux command", paste))
+            act.toast("Termux refused Dune (allow-external-apps). Command copied – long-press in Termux, Paste, Enter")
+            act.launchPackage(TERMUX)
         } catch (e: Exception) {
             act.toast("Couldn't reach Termux: ${e.message}")
         }

@@ -453,6 +453,8 @@ internal fun L14Block(vm: LauncherVM) {
     val hasTermius = remember(vm.resumeTick) { act.isInstalled(TERMIUS) }
     FlowRow {
         val sc = vm.l14Shortcut
+        // Connect: Termux runs ~/bin/l14 – wake lock, Tailscale up (login in the browser if needed), mosh/ssh into tmux
+        Chip("Connect") { L14Connect.connect(act, s) }
         Chip("SSH") { if (sc != null) vm.launchPinned(sc) else Actions.termux(act, Actions.sshCommand(s)) }
         if (hasTermius) Chip("Termius") { act.launchPackage(TERMIUS) }
         if (s.l14Mac.value.isNotBlank()) Chip("Wake") { vm.wakeL14() }
@@ -460,6 +462,55 @@ internal fun L14Block(vm: LauncherVM) {
             Chip(sc.label) { Actions.termux(act, Actions.sshCommand(s, sc.command)) }
         }
     }
+    var keep by remember { mutableStateOf(false) }
+    Row(Modifier.padding(bottom = 4.dp)) {
+        Text("set up Termux", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable { L14Connect.setup(act, s) }.padding(vertical = 4.dp))
+        Text("  ·  ", color = Dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 4.dp))
+        Text("keep Termux alive", color = Dim, fontSize = 13.sp, modifier = Modifier.combinedClickable { keep = true }.padding(vertical = 4.dp))
+    }
+    if (keep) KeepTermuxAliveDialog(vm) { keep = false }
+}
+
+/**
+ * Why sessions die when Termux is in the background, and the switches that stop it: battery optimisation
+ * (Dune can ask Android for Termux and Tailscale), Termux's own wake lock, and Android 12+'s phantom
+ * process killer, which only adb can turn off.
+ */
+@Composable
+internal fun KeepTermuxAliveDialog(vm: LauncherVM, onClose: () -> Unit) {
+    val act = LocalContext.current as Activity
+    val apps = listOf("Termux" to TERMUX, "Tailscale" to L14Connect.TAILSCALE_APP).filter { act.isInstalled(it.second) }
+    val adb = L14Connect.adbLines.joinToString("\n")
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Keep Termux alive") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Android stops background apps to save power; a session or Tailscale in Termux then times out. " +
+                    "Connect takes Termux's wake lock while it runs and uses keepalives, mosh and tmux, but these switches matter too:",
+                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp))
+                apps.forEach { (name, pkg) ->
+                    val off = remember(vm.resumeTick, pkg) { L14Connect.ignoringBattery(act, pkg) }
+                    Text(
+                        if (off) "✓  $name: not battery optimised" else "○  $name: battery optimised  →  allow in background",
+                        color = if (off) Dim else Fg, fontSize = 16.sp,
+                        modifier = Modifier.fillMaxWidth().combinedClickable { L14Connect.requestNoBatteryLimits(act, pkg) }.padding(vertical = 8.dp)
+                    )
+                }
+                Text("Termux's notification: pull it down and tap “Acquire wakelock” to keep it awake between sessions.",
+                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(vertical = 6.dp))
+                Text("Android 12+ also kills “phantom” background processes (tailscaled, ssh). Only adb can turn that off – " +
+                    "once, on the L14 with the phone plugged in by USB and USB debugging on:",
+                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp, bottom = 4.dp))
+                L14Connect.adbLines.forEach { Text(it, color = Fg, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp)) }
+                Text("On the L14, for mosh (a session that survives the phone sleeping) and tmux:",
+                    color = Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                L14Connect.l14Lines.forEach { Text(it, color = Fg, fontSize = 12.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp)) }
+            }
+        },
+        confirmButton = { TextButton(onClick = { L14Connect.copy(act, "adb", adb + "\n" + L14Connect.l14Lines.joinToString("\n")) }) { Text("Copy the commands") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("Close") } }
+    )
 }
 
 private val L14Fail = Color(0xFFE0806A)
@@ -827,6 +878,15 @@ fun SettingsScreen(vm: LauncherVM) {
         item {
             Note("Commands run on the L14 over SSH, one per line:  Label | command")
             Field("L14 commands", s.l14Lines, multi = true)
+        }
+        item {
+            Note("Connect (in the L14 section) opens Termux and runs ~/bin/l14: wake lock, Tailscale up – the login page opens " +
+                "by itself if it must – then mosh or ssh into a tmux session on the L14. Set up once; it installs the packages, " +
+                "the script, ssh keepalives and allow-external-apps.")
+            LinkRow("Set up Termux for the L14") { L14Connect.setup(act, s) }
+            var keep by remember { mutableStateOf(false) }
+            LinkRow("Keep Termux alive") { keep = true }
+            if (keep) KeepTermuxAliveDialog(vm) { keep = false }
         }
 
         section("Groups")

@@ -271,6 +271,7 @@ object ConnectHub : Hub {
                 Text(if (vpn) "VPN on (Tailscale or another)" else "No VPN", color = Dim, fontSize = 13.sp)
                 vm.l14Online?.let { Text("L14 " + if (it) "● reachable" else "○ not reachable", color = if (it) Sand else Dim, fontSize = 13.sp,
                     modifier = Modifier.combinedClickable { vm.checkL14() }.padding(vertical = 2.dp)) }
+                if (vm.store.l14Host.value.isNotBlank()) Chip("connect to L14") { L14Connect.connect(act, vm.store) }
                 Row {
                     Chip(speed ?: "speed test") {
                         if (speed?.endsWith("…") == true) return@Chip

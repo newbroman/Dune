@@ -73,14 +73,34 @@ notification shows when it is listening). A car or headset voice button can also
    Android 13+ greys out notification access for sideloaded apps: Settings › Apps › Dune › ⋮ ›
    *Allow restricted settings*, then enable it.
 
-### Termux (once, in Termux)
+### Termux (once)
+Set the L14's address in Dune › Settings › L14, then tap *set up Termux* under L14 on Home (or *Set up Termux
+for the L14* in Settings). Dune writes `l14/termux/l14` and `l14-setup.sh` into Termux and runs the setup: it
+installs openssh, tmux, mosh and – unless the Tailscale Android app is on the phone – Tailscale for Termux,
+makes an ssh key, writes `~/.ssh/config` (`Host l14`, keepalives), turns on `allow-external-apps`, and puts
+the key on the L14 if it can reach it. The same by hand, in Termux:
 ```
-pkg install -y openssh
-mkdir -p ~/.termux && echo "allow-external-apps = true" >> ~/.termux/termux.properties
-termux-reload-settings
-ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
-ssh-copy-id john@L14_IP_ADDRESS
+curl -fsSL https://raw.githubusercontent.com/newbroman/Dune/main/l14/termux/l14-setup.sh | L14_HOST=<address> bash
 ```
+**Connect** (L14 section, or the Connect hub) then opens Termux and runs `~/bin/l14`: it takes Termux's wake
+lock, checks the L14 answers, and if not brings Tailscale up – with Tailscale inside Termux it starts
+`tailscaled` (userspace networking), runs `tailscale up`, opens the login link in your browser by itself and
+waits; with the Tailscale app it opens the app – then connects with mosh when the L14 has `mosh-server`
+(survives the phone sleeping or changing network), else ssh with keepalives, into a tmux session called
+*dune* so a dropped connection comes back to the same shell. `l14 --status`, `l14 --ssh`, `l14 --login`.
+
+*keep Termux alive* (under L14) shows the switches that stop Android killing the session: battery
+optimisation off for Termux and Tailscale (Dune asks Android), Termux's *Acquire wakelock* notification
+button, and – Android 12+ only, by adb, once, with the phone plugged into the L14 – the phantom process
+killer:
+```
+adb shell "/system/bin/device_config set_sync_disabled_for_tests persistent"
+adb shell "/system/bin/device_config put activity_manager max_phantom_processes 2147483647"
+adb shell "settings put global settings_enable_monitor_phantom_procs false"
+adb shell "dumpsys deviceidle whitelist +com.termux"
+```
+On the L14, for mosh: `sudo apt install -y mosh tmux` and, if ufw is on,
+`sudo ufw allow in on tailscale0 to any port 60000:61000 proto udp`.
 
 ### L14 (once, on the laptop)
 ```

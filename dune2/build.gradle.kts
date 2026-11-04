@@ -14,8 +14,8 @@ android {
         applicationId = "uk.newbroman.dune2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 47
-        versionName = "2.43"
+        versionCode = 48
+        versionName = "2.44"
         // phones only: keeps the wake-word engine's native code from tripling the APK
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -50,7 +50,15 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // The Termux scripts (l14/termux/ in the repo: the L14 connect script and its setup) ride along as assets/termux/.
+    sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/termux-assets"))
 }
+
+val termuxScripts = tasks.register<Copy>("termuxScripts") {
+    from(rootProject.file("l14/termux"))
+    into(layout.buildDirectory.dir("generated/termux-assets/termux"))
+}
+tasks.named("preBuild") { dependsOn(termuxScripts) }
 
 dependencies {
     val bom = platform("androidx.compose:compose-bom:2024.12.01")

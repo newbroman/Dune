@@ -1,0 +1,228 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# l14: one command that gets you from Termux to a shell on the L14.
+#
+#   l14                 connect (host, user and port from ~/.config/dune/l14.conf)
+#   l14 HOST [USER] [PORT]
+#   l14 --ssh           plain ssh even if mosh is available
+#   l14 --login         make Tailscale (in Termux) log in again
+#   l14 --status        say what it would do, and stop
+#
+# What it does, in order:
+#   1. takes Termux's wake lock so Android doesn't suspend the session (released on exit);
+#   2. checks the L14 is reachable; if not, brings Tailscale up:
+#        - Tailscale inside Termux (pkg install tailscale): starts tailscaled (userspace
+#          networking), runs `tailscale up`, opens the login link in the browser by itself
+#          and waits until Tailscale reports it is running;
+#        - or the Tailscale Android app: opens it and waits for the L14 to answer;
+#   3. connects – mosh when both ends have it (survives the phone sleeping and changing
+#      network), else ssh with keepalives – into a tmux session called "dune" on the L14,
+#      so a dropped connection comes back to the same shell.
+#
+# Dune (the launcher) runs this with L14_HOST / L14_USER / L14_PORT / TS_APP set.
+# Installed by l14-setup.sh (https://github.com/newbroman/Dune, l14/termux/).
+set -u
+
+CONF="$HOME/.config/dune/l14.conf"
+# shellcheck disable=SC1090
+[ -f "$CONF" ] && . "$CONF"
+
+MODE=connect; WANT=auto
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --ssh) WANT=ssh ;;
+    --mosh) WANT=mosh ;;
+    --login) MODE=login ;;
+    --status) MODE=status ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -*) echo "l14: unknown option $1" >&2; exit 2 ;;
+    *) if [ -z "${POS_HOST:-}" ]; then POS_HOST=$1; elif [ -z "${POS_USER:-}" ]; then POS_USER=$1; else POS_PORT=$1; fi ;;
+  esac
+  shift
+done
+HOST=${POS_HOST:-${L14_HOST:-${HOST:-}}}
+USER_=${POS_USER:-${L14_USER:-${USER_:-john}}}
+PORT=${POS_PORT:-${L14_PORT:-${PORT:-22}}}
+TS_APP=${TS_APP:-0}        # 1 when the Tailscale Android app is installed (Dune tells us)
+MOSH=${MOSH:-auto}         # auto | no
+[ "$WANT" = ssh ] && MOSH=no
+[ "$WANT" = mosh ] && MOSH=yes
+TMUX_SESSION=${TMUX_SESSION:-dune}
+
+if [ -z "$HOST" ]; then
+  echo "l14: no L14 address. Set it in Dune › Settings › L14 and tap 'set up Termux', or: l14 HOST [USER] [PORT]" >&2
+  exit 2
+fi
+
+STATE="$HOME/.local/state/l14"; mkdir -p "$STATE"
+TS_SOCK="$STATE/tailscaled.sock"
+TS_STATE="$STATE/tailscaled.state"
+TS_LOG="$STATE/tailscaled.log"
+UP_LOG="$STATE/tailscale-up.log"
+
+say() { printf '\033[1;33ml14:\033[0m %s\n' "$*"; }
+
+# ---- keep Android from suspending Termux while we are connected
+WAKE=0
+if command -v termux-wake-lock >/dev/null 2>&1; then
+  termux-wake-lock >/dev/null 2>&1 && WAKE=1
+fi
+# shellcheck disable=SC2329
+cleanup() { [ "$WAKE" = 1 ] && termux-wake-unlock >/dev/null 2>&1; return 0; }
+trap cleanup EXIT
+
+# ---- can we reach the L14's ssh port right now? (3 s)
+reachable() { timeout 3 bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null; }
+
+# ---- Tailscale inside Termux (userspace networking, no root)
+ts() { tailscale --socket="$TS_SOCK" "$@"; }
+have_ts_termux() { command -v tailscaled >/dev/null 2>&1 && command -v tailscale >/dev/null 2>&1; }
+
+ts_backend_state() { ts status --json 2>/dev/null | sed -n 's/.*"BackendState": *"\([A-Za-z]*\)".*/\1/p' | head -1; }
+
+# The login link from `tailscale up` output (reads stdin): the URL after "To authenticate, visit:",
+# else the first URL that isn't a link to the docs.
+l14_login_url() {
+  local text url
+  text=$(cat)
+  url=$(printf '%s\n' "$text" | sed -n '/[Tt]o authenticate, visit/,$p' | grep -oE 'https?://[^[:space:]"'"'"'<>]+' | head -1)
+  [ -n "$url" ] || url=$(printf '%s\n' "$text" | grep -oE 'https?://[^[:space:]"'"'"'<>]+' | grep -vE '://[^/]*/(docs|kb)(/|$)' | head -1)
+  [ -n "$url" ] && printf '%s\n' "$url"
+}
+
+open_url() {
+  say "opening the Tailscale login in your browser"
+  if command -v termux-open-url >/dev/null 2>&1; then termux-open-url "$1" >/dev/null 2>&1 && return 0; fi
+  am start -a android.intent.action.VIEW -d "$1" >/dev/null 2>&1
+}
+
+ts_daemon_up() {
+  ts status >/dev/null 2>&1 && return 0
+  [ -n "$(ts_backend_state)" ] && return 0
+  say "starting tailscaled (userspace networking)"
+  rm -f "$TS_SOCK"
+  nohup tailscaled --tun=userspace-networking --state="$TS_STATE" --socket="$TS_SOCK" \
+    --socks5-server=localhost:1055 --outbound-http-proxy-listen=localhost:1055 >"$TS_LOG" 2>&1 &
+  disown 2>/dev/null || true
+  local _i
+  for _i in $(seq 1 20); do
+    [ -n "$(ts_backend_state)" ] && return 0
+    sleep 0.5
+  done
+  say "tailscaled did not start – see $TS_LOG"; return 1
+}
+
+# Bring Tailscale (in Termux) to Running, logging in through the browser if it has to.
+ts_termux_up() {
+  ts_daemon_up || return 1
+  local st url="" shown="" _i
+  st=$(ts_backend_state)
+  if [ "$MODE" = login ] || [ "$st" = NeedsLogin ] || [ "$st" = Stopped ] || [ "$st" = NoState ]; then
+    : >"$UP_LOG"
+    if [ "$MODE" = login ]; then ts up --force-reauth >"$UP_LOG" 2>&1 &
+    else ts up >"$UP_LOG" 2>&1 &
+    fi
+  fi
+  for _i in $(seq 1 300); do   # up to 10 minutes for you to finish the login
+    st=$(ts_backend_state)
+    case "$st" in
+      Running)
+        [ -n "$shown" ] && echo
+        say "Tailscale is up ($(ts ip -4 2>/dev/null | head -1))"
+        wait 2>/dev/null || true
+        return 0 ;;
+      NeedsMachineAuth)
+        [ "$shown" = auth ] || { say "this phone needs approving in the Tailscale admin console (Machines)"; shown=auth; } ;;
+      NeedsLogin|NoState|Stopped|"")
+        if [ -z "$url" ]; then
+          url=$(l14_login_url <"$UP_LOG")
+          [ -n "$url" ] || url=$(ts status --json 2>/dev/null | sed -n 's/.*"AuthURL": *"\([^"]*\)".*/\1/p' | head -1)
+          if [ -n "$url" ]; then
+            echo; say "log in to Tailscale:  $url"
+            command -v termux-clipboard-set >/dev/null 2>&1 && printf '%s' "$url" | termux-clipboard-set 2>/dev/null
+            open_url "$url"
+            say "waiting for the login to finish (come back to Termux when it says Success)"
+            shown=url
+          fi
+        fi ;;
+    esac
+    printf '.'
+    sleep 2
+  done
+  echo; say "gave up waiting for Tailscale (state: ${st:-none}). Log: $UP_LOG"; return 1
+}
+
+# ---- the Tailscale Android app: open it and wait for the L14 to answer
+ts_app_up() {
+  say "opening the Tailscale app – switch it on, then come back here"
+  am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.tailscale.ipn >/dev/null 2>&1 \
+    || am start -n com.tailscale.ipn/.MainActivity >/dev/null 2>&1 \
+    || am start -n com.tailscale.ipn/.IPNActivity >/dev/null 2>&1 || true
+  local _i
+  for _i in $(seq 1 60); do
+    reachable "$HOST" "$PORT" && { echo; return 0; }
+    printf '.'; sleep 2
+  done
+  echo; return 1
+}
+
+# ---- work out the route
+if [ "$MODE" = login ]; then
+  have_ts_termux || { say "Tailscale isn't installed in Termux (pkg install tailscale)"; exit 1; }
+  ts_termux_up || exit 1
+  MODE=connect
+fi
+VIA=direct
+if reachable "$HOST" "$PORT"; then
+  VIA=direct
+elif have_ts_termux; then
+  VIA=tailscale-termux
+elif [ "$TS_APP" = 1 ]; then
+  VIA=tailscale-app
+else
+  VIA=none
+fi
+
+if [ "$MODE" = status ]; then
+  echo "host: $USER_@$HOST:$PORT   route: $VIA   mosh: $MOSH"
+  have_ts_termux && echo "tailscale (termux): $(ts_backend_state 2>/dev/null || echo 'not running')"
+  exit 0
+fi
+
+PROXY=()
+case "$VIA" in
+  direct) ;;
+  tailscale-termux)
+    say "$HOST isn't answering – bringing Tailscale up in Termux"
+    ts_termux_up || exit 1
+    # userspace networking: ssh goes through tailscaled, not the phone's network stack
+    PROXY=(-o "ProxyCommand=tailscale --socket=$TS_SOCK nc %h %p")
+    MOSH=no ;;
+  tailscale-app)
+    say "$HOST isn't answering"
+    ts_app_up || { say "still can't reach $HOST:$PORT – is Tailscale on, and is the L14 awake?"; exit 1; } ;;
+  none)
+    say "can't reach $HOST:$PORT, and there is no Tailscale here (pkg install tailscale, or install the Tailscale app)"
+    exit 1 ;;
+esac
+
+# ---- connect: a tmux session on the L14 if it has tmux, else a login shell
+REMOTE="command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s $TMUX_SESSION; exec \"\$SHELL\" -l"
+SSH_OPTS=(-p "$PORT" -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o TCPKeepAlive=yes -o ConnectTimeout=20)
+
+if [ "$MOSH" != no ] && command -v mosh >/dev/null 2>&1; then
+  say "mosh → $USER_@$HOST (tmux '$TMUX_SESSION')"
+  START=$SECONDS
+  # plain words only: mosh passes the command through ssh without re-quoting it
+  mosh --ssh="ssh ${SSH_OPTS[*]}" "$USER_@$HOST" -- tmux new-session -A -s "$TMUX_SESSION"
+  RC=$?
+  # mosh that fails within a few seconds = no mosh-server or tmux on the L14 (or UDP blocked): use ssh
+  if [ $RC -ne 0 ] && [ $((SECONDS - START)) -lt 8 ]; then
+    say "mosh didn't start (on the L14: sudo apt install -y mosh tmux, and allow UDP 60000:61000 on tailscale0) – using ssh"
+  else
+    exit $RC
+  fi
+fi
+
+say "ssh → $USER_@$HOST (tmux '$TMUX_SESSION')"
+ssh -t "${SSH_OPTS[@]}" "${PROXY[@]}" "$USER_@$HOST" "$REMOTE"   # not exec: the wake lock is released on exit
+exit $?
