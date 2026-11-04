@@ -241,7 +241,9 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
             if (me != run) return
             val hit = roots().firstNotNullOfOrNull { find(it) }
             if (hit != null) { note("found $what"); main.postDelayed({ if (me == run) then(hit) }, 350); return }
-            if (++count < (if (tries > 0) tries else if (quick) 6 else 12)) { main.postDelayed(this, 250); return }
+            val limit = if (tries > 0) tries else if (quick) 6 else 12
+            count++
+            if (count < limit) { main.postDelayed(this, 250); return }
             note("NOT found: $what"); if (!quick) dump()
             if (onMiss != null) onMiss() else toast("Split screen: couldn't find $what (log in Settings › Workspaces)")
         } }
