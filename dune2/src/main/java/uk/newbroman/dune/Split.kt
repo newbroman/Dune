@@ -134,12 +134,16 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
             // (and not the second app either: it may be the one in front after the "beside" try)
             skip = setOf(a.component?.packageName ?: a.`package` ?: "", b.component?.packageName ?: b.`package` ?: "", "com.android.systemui", packageName)
             performGlobalAction(GLOBAL_ACTION_RECENTS)
-            waitFor(me, "Recent apps", { root -> root.takeIf { recentsWindow(it) } }, quick = true, onMiss = {
+            waitFor(me, "Recent apps", { root -> root.takeIf { recentsWindow(it) } }, quick = true, tries = 16, onMiss = {
                 // Android ignored the request: press the navigation bar's Overview button instead.
                 val btn = allRoots().firstNotNullOfOrNull { r -> find(r) { n -> (n.viewIdResourceName ?: "").endsWith("recent_apps") || n.contentDescription?.toString().equals("Overview", true) } }
                 note(if (btn != null) "pressing Overview" else "no Overview button either")
                 btn?.let { click(it) }
-                waitFor(me, "Recent apps (after Overview)", { root -> root.takeIf { recentsWindow(it) } }) { pickFirst(me, from, la, lb, b) }
+                waitFor(me, "Recent apps (after Overview)", { root -> root.takeIf { recentsWindow(it) } }, tries = 20, onMiss = {
+                    // last go: ask again once things have settled
+                    note("asking for Recent apps once more"); performGlobalAction(GLOBAL_ACTION_RECENTS)
+                    waitFor(me, "Recent apps (third try)", { root -> root.takeIf { recentsWindow(it) } }, tries = 20) { pickFirst(me, from, la, lb, b) }
+                }) { pickFirst(me, from, la, lb, b) }
             }) { pickFirst(me, from, la, lb, b) }
     }
 
@@ -231,13 +235,13 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
 
     /** Looks for something on screen every quarter second for up to 3 s, then gives up (with a log). */
     private fun waitFor(me: Int, what: String, find: (android.view.accessibility.AccessibilityNodeInfo) -> android.view.accessibility.AccessibilityNodeInfo?,
-                        quick: Boolean = false, onMiss: (() -> Unit)? = null, then: (android.view.accessibility.AccessibilityNodeInfo) -> Unit) {
-        var tries = 0
+                        quick: Boolean = false, onMiss: (() -> Unit)? = null, tries: Int = 0, then: (android.view.accessibility.AccessibilityNodeInfo) -> Unit) {
+        var count = 0
         val step = object : Runnable { override fun run() {
             if (me != run) return
             val hit = roots().firstNotNullOfOrNull { find(it) }
             if (hit != null) { note("found $what"); main.postDelayed({ if (me == run) then(hit) }, 350); return }
-            if (++tries < (if (quick) 6 else 12)) { main.postDelayed(this, 250); return }
+            if (++count < (if (tries > 0) tries else if (quick) 6 else 12)) { main.postDelayed(this, 250); return }
             note("NOT found: $what"); if (!quick) dump()
             if (onMiss != null) onMiss() else toast("Split screen: couldn't find $what (log in Settings › Workspaces)")
         } }
