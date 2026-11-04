@@ -205,9 +205,34 @@ case "$VIA" in
     exit 1 ;;
 esac
 
+# ---- Tailscale SSH in "check" mode asks you to approve each new login in a browser. Do a quick
+# non-interactive login first: if Tailscale prints its approval link, open it for you and wait until
+# you've approved (the approval then covers the real session, and the next few hours of logins).
+SSH_OPTS=(-p "$PORT" -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o TCPKeepAlive=yes -o ConnectTimeout=20)
+ts_ssh_check() {
+  local log pid url opened=no t=0
+  log=$(mktemp)
+  ssh "${SSH_OPTS[@]}" "${PROXY[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$USER_@$HOST" true </dev/null >/dev/null 2>"$log" &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$opened" = no ]; then
+      url=$(grep -oE 'https://login\.tailscale\.com/[^[:space:]]+' "$log" | head -1)
+      if [ -n "$url" ]; then
+        say "Tailscale SSH wants this login approved – opening the page (approve it, then come back)"
+        open_url "$url"; opened=yes
+      fi
+    fi
+    sleep 1; t=$((t + 1))
+    if [ "$t" -ge 600 ]; then kill "$pid" 2>/dev/null; say "no approval after 10 minutes"; break; fi
+  done
+  wait "$pid" 2>/dev/null
+  [ "$opened" = yes ] && say "approved – connecting"
+  rm -f "$log"
+}
+ts_ssh_check
+
 # ---- connect: a tmux session on the L14 if it has tmux, else a login shell
 REMOTE="command -v tmux >/dev/null 2>&1 && exec tmux new-session -A -s $TMUX_SESSION; exec \"\$SHELL\" -l"
-SSH_OPTS=(-p "$PORT" -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -o TCPKeepAlive=yes -o ConnectTimeout=20)
 
 if [ "$MOSH" != no ] && command -v mosh >/dev/null 2>&1; then
   say "mosh → $USER_@$HOST (tmux '$TMUX_SESSION')"
