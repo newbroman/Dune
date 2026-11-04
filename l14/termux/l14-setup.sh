@@ -108,14 +108,15 @@ Host l14
 EOF
   mv "$tmp" "$sc"; chmod 600 "$sc"
   echo "== ~/.ssh/config: Host l14 → $USER_@$HOST:$PORT with keepalives"
+  echo "== checking the L14 answers ssh (up to 15 s)…"
 
   # ---- put the key on the L14 if it answers now (asks the L14 password once)
   if timeout 3 bash -c "exec 3<>/dev/tcp/$HOST/$PORT" 2>/dev/null; then
-    if ssh -o BatchMode=yes -o ConnectTimeout=8 -p "$PORT" "$USER_@$HOST" true 2>/dev/null; then
+    if timeout 15 ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -p "$PORT" "$USER_@$HOST" true 2>/dev/null; then
       echo "== the L14 already accepts this phone's key"
     else
       echo "== copying your key to the L14 (its password, once):"
-      ssh-copy-id -p "$PORT" "$USER_@$HOST" </dev/null || echo "   (not done – run later:  ssh-copy-id -p $PORT $USER_@$HOST)"
+      timeout 90 ssh-copy-id -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -p "$PORT" "$USER_@$HOST" || echo "   (not done – run later:  ssh-copy-id -p $PORT $USER_@$HOST)"
     fi
   else
     echo "== $HOST isn't reachable right now; the first 'l14' will bring Tailscale up and may ask the L14's password"
