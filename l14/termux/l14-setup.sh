@@ -52,10 +52,12 @@ EOF
   case "$TS_WANT" in
     termux) ts_termux=yes ;;
     no) ts_termux=no ;;
-    *) if command -v tailscale >/dev/null 2>&1; then ts_termux=yes; elif [ "$TS_APP" = 1 ]; then ts_termux=no; else ts_termux=yes; fi ;;
+    # Termux's own repository has no tailscale package, so the Android Tailscale app is the normal route;
+    # only an already-installed Termux tailscale (or L14_TAILSCALE=termux) is used instead.
+    *) ts_termux=no ;;
   esac
   if [ "$ts_termux" = yes ]; then
-    pkg install -y tailscale </dev/null || echo "   (tailscale not installed – install the Tailscale app instead)"
+    command -v tailscale >/dev/null 2>&1 || pkg install -y tailscale </dev/null 2>/dev/null || echo "   (no tailscale package for Termux – using the Tailscale app)"
   fi
 
   # ---- the connect script
