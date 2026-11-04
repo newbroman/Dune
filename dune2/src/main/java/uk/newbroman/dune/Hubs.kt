@@ -36,6 +36,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -169,15 +171,22 @@ fun HubScreen(vm: LauncherVM) {
         HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), beyondViewportPageCount = 1) { page ->
             hubs[page % n].Page(vm, active = pager.currentPage == page && vm.screen == Screen.HOME, gestures = gestures)
         }
-        // The hub bar: one glyph per hub, tap to jump.
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 2.dp),
+        // The hub bar: one glyph per hub, tap to jump. It goes round like the hubs do, with the current hub in the middle.
+        val bar = androidx.compose.foundation.lazy.rememberLazyListState(initialFirstVisibleItemIndex = (pager.currentPage - 2).coerceAtLeast(0))
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        LaunchedEffect(pager.currentPage) {
+            val half = bar.layoutInfo.viewportEndOffset / 2 - with(density) { 32.dp.roundToPx() }
+            bar.animateScrollToItem(pager.currentPage, -half.coerceAtLeast(0))
+        }
+        androidx.compose.foundation.lazy.LazyRow(Modifier.fillMaxWidth().padding(vertical = 2.dp), state = bar,
             verticalAlignment = Alignment.CenterVertically) {
-            hubs.forEachIndexed { i, h ->
+            items(n * laps) { k ->
+                val i = k % n; val h = hubs.getOrNull(i) ?: return@items
                 val on = real == i
-                Column(Modifier.combinedClickable { scope.launch { pager.animateScrollToPage(nearest(i)) } }.padding(horizontal = 10.dp, vertical = 4.dp),
+                Column(Modifier.width(64.dp).combinedClickable { scope.launch { pager.animateScrollToPage(nearest(i)) } }.padding(vertical = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(h.glyph, color = if (on) Sand else Dim, fontSize = 18.sp)
-                    Text(h.title.lowercase(), color = if (on) Sand else Faint, fontSize = 10.sp)
+                    Text(h.title.lowercase(), color = if (on) Sand else Faint, fontSize = 10.sp, maxLines = 1)
                 }
             }
         }
