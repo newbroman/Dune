@@ -69,6 +69,29 @@ class PanoTest {
     @Test fun sphereWithTiltedHolding() { check(true, -120.0, 4.0) }
     @Test fun horizonSweep() { val c = check(false, 200.0, 0.0); assertTrue(c.h < c.w / 3) }
 
+    // a busy world (like a real room) for measuring the lens: stripes and blobs at several scales
+    private fun busy(az: Double, el: Double): Float {
+        val a = Math.toRadians(az); val e = Math.toRadians(el)
+        return (128 + 50 * sin(a * 7) * cos(e * 5) + 40 * sin(a * 23 + e * 11) + 30 * cos(e * 19 - a * 3)).toFloat()
+    }
+    private fun grayFrame(r: FloatArray, fw: Int, fh: Int, f: Double) = FloatArray(fw * fh) { k ->
+        val u = k % fw; val v = k / fw
+        val d = unit(doubleArrayOf((u - (fw - 1) / 2.0) / f, -(v - (fh - 1) / 2.0) / f, -1.0))
+        val w = doubleArrayOf(r[0] * d[0] + r[1] * d[1] + r[2] * d[2], r[3] * d[0] + r[4] * d[1] + r[5] * d[2], r[6] * d[0] + r[7] * d[1] + r[8] * d[2])
+        busy(Math.toDegrees(atan2(w[0], w[1])), Math.toDegrees(asin(w[2].coerceIn(-1.0, 1.0))))
+    }
+
+    @Test fun measuresTheLensWhenThePhoneReportsItWrong() {
+        val fw = 120; val fh = 160; val trueF = 0.62
+        val ts = Pano.targets(true, Pano.fov(fw.toDouble(), trueF * fh), Pano.fov(fh.toDouble(), trueF * fh))
+        val rots = ts.map { rot(15 + it.yaw, it.pitch) }
+        val g = rots.map { grayFrame(it, fw, fh, trueF * fh) }
+        for (guess in listOf(0.9, 0.45)) {
+            val got = Pano.calibrate(rots, g, fw, fh, guess)
+            assertTrue("guess $guess → $got, want ≈$trueF", abs(got - trueF) / trueF < 0.03)
+        }
+    }
+
     @Test fun sphereTargetsCoverPoles() {
         val ts = Pano.targets(true, 50.0, 64.0)
         assertTrue(ts.any { it.pitch == 90.0 } && ts.any { it.pitch == -90.0 })

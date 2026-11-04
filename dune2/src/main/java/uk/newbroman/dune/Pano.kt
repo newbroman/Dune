@@ -104,7 +104,17 @@ object Pano {
         BitmapFactory.decodeFile(shots[0].file.path, probe)
         val fw = probe.outWidth; val fh = probe.outHeight
         if (fw <= 0 || fh <= 0) return@withContext null
-        val c = compose(shots.map { it.r }, fw, fh, sphere, startAz, fLong, progress) { n ->
+        // Phones don't always report their lens width correctly: measure it from how the frames overlap.
+        val small = shots.map { sh ->
+            BitmapFactory.decodeFile(sh.file.path, BitmapFactory.Options().apply { inSampleSize = max(1, max(fw, fh) / 256) })?.let { bm ->
+                val g = gray(bm); bm.recycle(); g
+            }
+        }
+        val f0 = small.firstOrNull { it != null }?.let { g0 ->
+            calibrate(shots.map { it.r }, small.map { it?.second }, g0.first.first, g0.first.second, fLong)
+        } ?: fLong
+        lastFocal = f0
+        val c = compose(shots.map { it.r }, fw, fh, sphere, startAz, f0, progress) { n ->
             BitmapFactory.decodeFile(shots[n].file.path)?.let { bm ->
                 if (bm.width != fw || bm.height != fh) { bm.recycle(); null }
                 else IntArray(fw * fh).also { bm.getPixels(it, 0, fw, 0, 0, fw, fh); bm.recycle() }
@@ -113,6 +123,67 @@ object Pano {
         val bmp = Bitmap.createBitmap(c.px, c.w, c.h, Bitmap.Config.ARGB_8888)
         val bytes = ByteArrayOutputStream().also { bmp.compress(Bitmap.CompressFormat.JPEG, 92, it) }.toByteArray(); bmp.recycle()
         save(ctx, bytes, xmp(c.w, c.h, c.fullW, c.fullW / 2, c.left, c.top), sphere)
+    }
+
+    /** The lens width the last stitch measured (focal length ÷ long side), to aim the next panorama's targets with. */
+    @Volatile var lastFocal: Double? = null
+
+    private fun gray(bm: Bitmap): Pair<Pair<Int, Int>, FloatArray> {
+        val w = bm.width; val h = bm.height; val px = IntArray(w * h); bm.getPixels(px, 0, w, 0, 0, w, h)
+        return (w to h) to FloatArray(w * h) { val c = px[it]; ((c shr 16 and 255) * .3f + (c shr 8 and 255) * .59f + (c and 255) * .11f) }
+    }
+
+    /**
+     * Finds the focal length (as a fraction of a frame's long side) that makes overlapping frames agree best: points of
+     * one frame are carried through both frames' orientations into the other, and the brightness differences summed.
+     * [g] are small greyscale frames (w × h); returns [guess] if there's too little overlap to judge.
+     */
+    fun calibrate(rots: List<FloatArray>, g: List<FloatArray?>, w: Int, h: Int, guess: Double): Double {
+        val n = rots.size
+        val fwd = rots.map { forward(it) }
+        // neighbouring frames (closest pairs) are the ones that overlap
+        val pairs = ArrayList<Pair<Int, Int>>()
+        for (i in 0 until n) for (j in i + 1 until n) if (g[i] != null && g[j] != null) pairs += i to j
+        val near = pairs.sortedBy { (i, j) -> angle(fwd[i], fwd[j]) }.filter { (i, j) -> angle(fwd[i], fwd[j]) in 5.0..60.0 }.take(12)
+        if (near.isEmpty()) return guess
+        val L = max(w, h).toDouble(); val cx = (w - 1) / 2.0; val cy = (h - 1) / 2.0
+        fun err(fl: Double): Double {
+            val f = fl * L
+            var sum = 0.0; var cnt = 0
+            for ((i, j) in near) {
+                val a = g[i]!!; val b = g[j]!!; val ra = rots[i]; val rb = rots[j]
+                var y = 4
+                while (y < h - 4) {
+                    var x = 4
+                    while (x < w - 4) {
+                        // pixel of frame i → device direction → world → frame j
+                        val dx = (x - cx) / f; val dy = -(y - cy) / f; val dz = -1.0
+                        val wx = ra[0] * dx + ra[1] * dy + ra[2] * dz; val wy = ra[3] * dx + ra[4] * dy + ra[5] * dz; val wz = ra[6] * dx + ra[7] * dy + ra[8] * dz
+                        val ex = rb[0] * wx + rb[3] * wy + rb[6] * wz; val ey = rb[1] * wx + rb[4] * wy + rb[7] * wz; val ez = rb[2] * wx + rb[5] * wy + rb[8] * wz
+                        if (ez < -0.1) {
+                            val u = cx + f * ex / -ez; val v = cy - f * ey / -ez
+                            if (u >= 1 && v >= 1 && u < w - 2 && v < h - 2) {
+                                val ui = u.toInt(); val vi = v.toInt(); val fu = (u - ui).toFloat(); val fv = (v - vi).toFloat()
+                                val k = vi * w + ui
+                                val bv = (b[k] * (1 - fu) + b[k + 1] * fu) * (1 - fv) + (b[k + w] * (1 - fu) + b[k + w + 1] * fu) * fv
+                                sum += abs(a[y * w + x] - bv); cnt++
+                            }
+                        }
+                        x += 3
+                    }
+                    y += 3
+                }
+            }
+            // too little overlap at this width can't be trusted
+            return if (cnt < 300 * near.size / 4) Double.MAX_VALUE else sum / cnt
+        }
+        var best = guess; var bestE = err(guess)
+        var s = 0.45
+        while (s <= 2.2) { val fl = guess * s; val e = err(fl); if (e < bestE) { bestE = e; best = fl }; s *= 1.03 }
+        // and finer around the best
+        var t = 0.97
+        while (t <= 1.03) { val fl = best * t; val e = err(fl); if (e < bestE) { bestE = e; best = fl }; t += 0.004 }
+        return best
     }
 
     /** The finished picture and where it sits within the full 360 × 180 sphere. */

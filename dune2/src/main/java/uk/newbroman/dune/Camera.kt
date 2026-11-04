@@ -322,7 +322,9 @@ fun CameraScreen(vm: LauncherVM) {
 
     // ---- panoramas: sensors, frames, stitching
     val lensForPano = (lensId?.let { id -> lenses.firstOrNull { it.id == id } } ?: mainLens)
-    val fLong = Pano.focalOfLong(lensForPano?.focalMm, lensForPano?.sensorLongMm)
+    // the lens width measured by earlier panoramas beats what the phone reports
+    val fKey = "panoFocal_" + (lensForPano?.id ?: "main")
+    val fLong = prefs.getFloat(fKey, 0f).takeIf { it > 0f }?.toDouble() ?: Pano.focalOfLong(lensForPano?.focalMm, lensForPano?.sensorLongMm)
     val finishPano: () -> Unit = {
         val shots = pv.shots.toList()
         if (shots.size < 2) { act.toast("Take at least two frames first"); }
@@ -334,6 +336,7 @@ fun CameraScreen(vm: LauncherVM) {
                 val u = runCatching { Pano.stitch(act, shots, sphere, pv.startAz, fLong) { p -> pv.stitching = p } }
                     .onFailure { act.toast("Couldn't stitch: ${it.message ?: it.javaClass.simpleName}") }.getOrNull()
                 pv.stitching = -1f
+                Pano.lastFocal?.let { f -> prefs.edit().putFloat(fKey, f.toFloat()).apply() }
                 if (u != null) { last = u; Gallery.changed.value++; act.toast(if (sphere) "360 photo saved – Google Photos shows it as a sphere" else "Panorama saved") }
                 pv.reset(act)
             }
