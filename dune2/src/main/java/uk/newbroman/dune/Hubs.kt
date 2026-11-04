@@ -89,6 +89,16 @@ object Hubs {
     /** Once at start-up: switch on hubs added since this phone last looked (but never re-add one you switched off). */
     fun introduceNew(s: Store) {
         val known = s.hubsKnown.value.split(',').filter { it.isNotEmpty() }
+        // House, Shop and Newborough were wrongly counted as "already offered" on new installs and never switched on
+        // (2.41 fix): offer them once more.
+        if (!s.hubsFix241.value) {
+            s.hubsFix241.set(true)
+            if (known.isNotEmpty()) {
+                val cur = s.hubs.value.split(',').filter { it.isNotEmpty() }
+                val add = listOf("house", "shop", "warren").filter { it !in cur }
+                if (add.isNotEmpty()) s.hubs.set((cur + add).joinToString(","))
+            }
+        }
         // First run of a version with this check: everything except the hubs new since 2.1 counts as already offered.
         if (known.isEmpty()) s.hubsKnown.set(ALL.map { it.id }.filter { it !in NEW_IN_2_2 }.joinToString(","))
         else {
