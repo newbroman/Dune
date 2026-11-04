@@ -1,5 +1,7 @@
 package uk.newbroman.dune
 
+import android.widget.Toast
+
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
@@ -129,7 +131,8 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
     /** 3. The long way: Recent apps › the first app's card › Split screen › the second app's card. */
     private fun viaRecents(me: Int, from: Context, a: Intent, b: Intent, la: String, lb: String) {
             // Only the Recent apps screen counts – not the app itself, the status bar or the navigation bar.
-            skip = setOf(a.component?.packageName ?: "", "com.android.systemui", packageName)
+            // (and not the second app either: it may be the one in front after the "beside" try)
+            skip = setOf(a.component?.packageName ?: a.`package` ?: "", b.component?.packageName ?: b.`package` ?: "", "com.android.systemui", packageName)
             performGlobalAction(GLOBAL_ACTION_RECENTS)
             waitFor(me, "Recent apps", { root -> root.takeIf { recentsWindow(it) } }, quick = true, onMiss = {
                 // Android ignored the request: press the navigation bar's Overview button instead.
@@ -280,6 +283,21 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
     }
 
     private fun note(s: String) { trace.appendLine(s); save() }
+
+    /** A short message; problems also go into a notification you can expand and read in full (toasts get cut off). */
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        if (!Regex("(?i)couldn|didn|can't|not found").containsMatchIn(msg)) return
+        runCatching {
+            val nm = getSystemService(android.app.NotificationManager::class.java) ?: return
+            nm.createNotificationChannel(android.app.NotificationChannel("dune-help", "Dune problems", android.app.NotificationManager.IMPORTANCE_DEFAULT))
+            val n = android.app.Notification.Builder(this, "dune-help").setSmallIcon(android.R.drawable.stat_notify_error)
+                .setContentTitle("Dune").setContentText(msg)
+                .setStyle(android.app.Notification.BigTextStyle().bigText(msg + "\n\nThe full log is in Dune › Settings › Workspaces."))
+                .setAutoCancel(true).build()
+            nm.notify(7301, n)
+        }
+    }
     /** What was on screen when a step failed: text, descriptions and view ids only. */
     private fun dump() {
         allRoots().filter { (it.packageName?.toString() ?: "") != "com.android.systemui" || it.childCount < 8 }.forEachIndexed { wi, r ->
