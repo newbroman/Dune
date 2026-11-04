@@ -82,8 +82,26 @@ object OpenApps {
             }
         }
         // Phones that don't report closed screens: fall back to everything used in the last day.
-        return last.filter { (p, t) -> p !in skip && (if (sawDestroy) open[p]?.isNotEmpty() == true else now - t < 86_400_000L) }
+        val closed = closedAt(ctx)
+        return last.filter { (p, t) -> p !in skip && t > (closed[p] ?: 0L) && (if (sawDestroy) open[p]?.isNotEmpty() == true else now - t < 86_400_000L) }
             .map { Open(it.key, it.value) }.sortedByDescending { it.lastUsed }
+    }
+
+    /** When Dune last closed each app (so it drops off the list until you use it again). */
+    private fun closedAt(ctx: Context): Map<String, Long> =
+        ctx.getSharedPreferences("dune-local", 0).getString("openClosed", "")!!.lines().mapNotNull { l ->
+            l.split('=').takeIf { it.size == 2 }?.let { it[0] to (it[1].toLongOrNull() ?: 0L) } }.toMap()
+
+    /**
+     * Closes an app that's in the background: Android ends its processes (anything unsaved in it is lost, as with
+     * swiping it away). Its card may stay in Android's own Recent apps until you swipe it, but it's no longer running.
+     */
+    fun close(ctx: Context, pkgs: Collection<String>) {
+        val am = ctx.getSystemService(android.app.ActivityManager::class.java)
+        pkgs.forEach { runCatching { am?.killBackgroundProcesses(it) } }
+        val now = System.currentTimeMillis()
+        val m = closedAt(ctx).filterValues { now - it < 7 * 86_400_000L } + pkgs.associateWith { now }
+        ctx.getSharedPreferences("dune-local", 0).edit().putString("openClosed", m.entries.joinToString("\n") { "${it.key}=${it.value}" }).apply()
     }
 
     fun ago(t: Long): String {
@@ -98,7 +116,8 @@ fun OpenAppsScreen(vm: LauncherVM) {
     val ctx = LocalContext.current
     var access by remember { mutableStateOf(OpenApps.hasAccess(ctx)) }
     var list by remember { mutableStateOf<List<OpenApps.Open>?>(null) }
-    LaunchedEffect(vm.resumeTick) {
+    var tick by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    LaunchedEffect(vm.resumeTick, tick) {
         access = OpenApps.hasAccess(ctx)
         if (!access) return@LaunchedEffect
         val home = ctx.packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME), 0).map { it.activityInfo.packageName }
@@ -128,12 +147,17 @@ fun OpenAppsScreen(vm: LauncherVM) {
                         ).padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             if (a != null) AppIcon(vm, a, 48.dp) else Spacer(Modifier.width(48.dp))
                             Text(a?.label ?: vm.labelFor(o.pkg), color = Fg, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-                            Text(OpenApps.ago(o.lastUsed), color = Faint, fontSize = 10.sp)
+                            Text(OpenApps.ago(o.lastUsed) + "   ✕", color = Faint, fontSize = 10.sp, modifier = Modifier.combinedClickable {
+                                OpenApps.close(ctx, listOf(o.pkg)); tick++
+                            }.padding(horizontal = 4.dp, vertical = 2.dp))
                         }
                     }
                 }
             }
             Spacer(Modifier.weight(if (l.isNullOrEmpty()) 1f else 0.001f))
+            if (!l.isNullOrEmpty()) Text("Close all", color = Sand, fontSize = 15.sp, modifier = Modifier.combinedClickable {
+                OpenApps.close(ctx, l.map { it.pkg }); tick++; ctx.toast("Closed ${l.size} apps")
+            }.padding(vertical = 10.dp))
             Row(Modifier.fillMaxWidth().padding(vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text("Android's Recent apps", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
                     val s = SplitService.instance
@@ -141,7 +165,7 @@ fun OpenAppsScreen(vm: LauncherVM) {
                     else ctx.toast("Turn on Dune's accessibility service (Settings › Workspaces) for this")
                 }.padding(vertical = 8.dp))
                 Spacer(Modifier.weight(1f))
-                Text("Long-press: app info · close it there", color = Faint, fontSize = 11.sp)
+                Text("✕ closes · long-press: app info", color = Faint, fontSize = 11.sp)
             }
         }
     }
