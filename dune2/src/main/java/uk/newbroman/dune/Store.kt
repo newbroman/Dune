@@ -280,6 +280,7 @@ class Store private constructor(ctx: Context) {
     val hubsKnown = Str("hubsKnown", "")
     val hubsFix241 = Flag("hubsFix241", false)
     val driveHotspot = Flag("driveHotspot", true)
+    val phoneCamera = Flag("phoneCamera", true)
     val driveHotspotOff = Flag("driveHotspotOff", true)
     /** Last app used from each hub's "apps ▾" list, "hub=package" per line. */
     val hubLastApp = Str("hubLastApp", "")

@@ -358,13 +358,26 @@ object RecordHub : Hub {
                 AppsRow(vm, id, cameraApps, WORDS)
                 // Capture
                 Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    BigAction("📷", "Photo") { vm.cameraVideo = false; vm.screen = Screen.CAMERA }
-                    BigAction("🎥", "Video") { vm.cameraVideo = true; vm.screen = Screen.CAMERA }
+                    // Photo and video: the phone's own camera app (all its features) or Dune's, as set in Settings › Camera
+                    val phone = vm.store.phoneCamera.value
+                    BigAction("📷", "Photo", onLong = { vm.cameraMode = "photo"; vm.screen = Screen.CAMERA }) {
+                        if (!phone || !PhoneCamera.open(act, video = false)) { vm.cameraMode = "photo"; vm.screen = Screen.CAMERA }
+                    }
+                    BigAction("🎥", "Video", onLong = { vm.cameraMode = "video"; vm.screen = Screen.CAMERA }) {
+                        if (!phone || !PhoneCamera.open(act, video = true)) { vm.cameraMode = "video"; vm.screen = Screen.CAMERA }
+                    }
                     AudioButton()
                     val trk by Tracks.recording.collectAsState()
                     BigAction(if (trk) "■" else "⌖", if (trk) "Stop track" else "Track") {
                         if (trk) Tracks.stop(act) else vm.jumpHub = "map"
                     }
+                }
+                // Dune's own camera modes, which the phone's camera doesn't have
+                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    BigAction("◐", "360") { vm.cameraMode = "360"; vm.screen = Screen.CAMERA }
+                    BigAction("⟷", "Panorama") { vm.cameraMode = "pano"; vm.screen = Screen.CAMERA }
+                    BigAction("⏱", "Time-lapse") { vm.cameraMode = "lapse"; vm.screen = Screen.CAMERA }
+                    BigAction("✦", "Dune cam") { vm.cameraMode = "photo"; vm.screen = Screen.CAMERA }
                 }
                 AudioMeter()
                 // Gallery tabs
@@ -424,8 +437,8 @@ object RecordHub : Hub {
 }
 
 @Composable
-private fun BigAction(icon: String, label: String, onClick: () -> Unit) {
-    Column(Modifier.width(74.dp).border(1.dp, Faint, RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick).padding(vertical = 12.dp),
+private fun BigAction(icon: String, label: String, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
+    Column(Modifier.width(74.dp).border(1.dp, Faint, RoundedCornerShape(16.dp)).combinedClickable(onClick = onClick, onLongClick = onLong).padding(vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Text(icon, fontSize = 24.sp, color = Fg)
         Text(label, fontSize = 12.sp, color = Dim, maxLines = 1)

@@ -72,6 +72,8 @@ val SETTINGS_INDEX: List<Pair<String, String>> = listOf(
     "Bluetooth" to "Drive mode",
     "head unit" to "Drive mode",
     "Start Drive mode now" to "Drive mode",
+    "Camera" to "Camera",
+    "Photo and Video open the phone's own camera" to "Camera",
     "Weather" to "Weather",
     "Change the weather widget" to "Weather",
     "Make it taller" to "Weather",

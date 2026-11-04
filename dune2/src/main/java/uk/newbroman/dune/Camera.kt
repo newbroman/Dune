@@ -104,6 +104,13 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.tan
 
+/** The phone's own camera app (night mode, pro mode, 200 MP… whatever it has). */
+object PhoneCamera {
+    fun open(ctx: Context, video: Boolean): Boolean = ctx.tryStart(
+        android.content.Intent(if (video) MediaStore.INTENT_ACTION_VIDEO_CAMERA else MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
 /** One of the phone's rear cameras, as CameraX sees it. */
 data class Lens(val id: String, val fovLong: Double, val minFocusDiopters: Float, val focalMm: Float?, val sensorLongMm: Float?)
 
@@ -180,7 +187,7 @@ fun CameraScreen(vm: LauncherVM) {
     if (!granted) { Box(Modifier.fillMaxSize().background(Color.Black)); return }
 
     val prefs = remember { act.getSharedPreferences("dune", 0) }
-    var mode by rememberSaveable { mutableStateOf(if (vm.cameraVideo) VIDEO else PHOTO) }
+    var mode by rememberSaveable { mutableStateOf(vm.cameraMode ?: if (vm.cameraVideo) VIDEO else PHOTO) }
     val video = mode == VIDEO; val pano = mode == PANO || mode == SPHERE; val lapseMode = mode == LAPSE
     var back by rememberSaveable { mutableStateOf(true) }
     var flash by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
@@ -457,6 +464,7 @@ fun CameraScreen(vm: LauncherVM) {
                     if (pv.active) pv.reset(act) else { vm.goHome(); vm.jumpHub = "record" }
                 }.padding(8.dp))
                 Spacer(Modifier.weight(1f))
+                if (mode == PHOTO || video) TopChip("phone cam", false) { if (recording == null) PhoneCamera.open(act, video) }
                 if (!pano) {
                     TopChip("⏱ " + if (timer == 0) "off" else "${timer}s", timer > 0) {
                         timer = when (timer) { 0 -> 3; 3 -> 10; else -> 0 }; prefs.edit().putInt("camTimer", timer).apply()

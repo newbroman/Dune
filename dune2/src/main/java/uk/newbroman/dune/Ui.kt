@@ -842,6 +842,13 @@ fun SettingsScreen(vm: LauncherVM) {
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
+        section("Camera")
+        item {
+            Toggle("Photo and Video open the phone's own camera", s.phoneCamera)
+            Note("The phone's camera app has its own extras (night, pro, high-resolution…). Dune's camera keeps 360, panorama and time-lapse – " +
+                "they have their own buttons in the Record hub. Long-press Photo or Video there to use Dune's camera instead.")
+        }
+
         section("Weather")
         item {
             if (s.weatherWidget.value.isNotBlank()) {

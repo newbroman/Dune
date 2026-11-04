@@ -173,6 +173,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var tasksTab by mutableStateOf("tasks")
     /** Record hub: open the camera in video mode. */
     var cameraVideo by mutableStateOf(false)
+    /** Which mode Dune's camera opens in (photo, video, lapse, pano, 360); null = from cameraVideo. */
+    var cameraMode by mutableStateOf<String?>(null)
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
     /** Map files to add as layers (opened with Dune from another app). */
