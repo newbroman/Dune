@@ -117,6 +117,7 @@ object CommsHub : Hub {
                     Text(it, color = Fg, fontSize = 15.sp, modifier = Modifier.fillMaxWidth()
                         .combinedClickable { vm.inboxAnswer = null }.padding(vertical = 8.dp))
                 }
+                CallBlock(vm, convos.orEmpty().map { it.who })
                 if (NotifService.instance == null) LinkRow("Allow notification access so messages appear here") { Actions.notificationAccess(act) }
                 else if (convos != null && shown.isEmpty()) Note("No messages in the last week yet. They'll gather here as they arrive.")
             }
@@ -191,5 +192,58 @@ private fun ReplyBox(n: NotifItem) {
         Text("🎤", fontSize = 18.sp, modifier = Modifier.combinedClickable { act.listen("Reply to ${n.title}") { it?.let { t -> text = t } } }
             .padding(horizontal = 8.dp, vertical = 8.dp))
         Text("send", color = Sand, fontSize = 15.sp, modifier = Modifier.combinedClickable { send() }.padding(horizontal = 12.dp, vertical = 8.dp))
+    }
+}
+
+/** Phone someone: by mobile, or a WhatsApp voice / video call. Type a name, or pick a starred contact. */
+@Composable
+private fun CallBlock(vm: LauncherVM, recent: List<String>) {
+    val act = LocalContext.current as MainActivity
+    var q by remember { mutableStateOf("") }
+    var allowed by remember { mutableStateOf(Find.canReadContacts(act)) }
+    var pick by remember { mutableStateOf<Person?>(null) }
+    val found by produceState<List<Person>>(emptyList(), q, allowed) {
+        value = withContext(Dispatchers.IO) { if (q.length >= 2) Find.people(act, q, 6) else emptyList() }
+    }
+    val starred by produceState<List<Person>>(emptyList(), allowed, vm.resumeTick) {
+        value = withContext(Dispatchers.IO) {
+            // starred contacts, then the people you've been messaging lately who are in your contacts
+            val st = Find.starred(act, 10)
+            val rec = recent.take(8).mapNotNull { n -> Find.people(act, n, 1).firstOrNull()?.takeIf { it.name.equals(n, true) } }
+            (st + rec).distinctBy { it.name }.take(12)
+        }
+    }
+    Text("CALL", color = Dim, fontSize = 12.sp, letterSpacing = 2.sp, modifier = Modifier.padding(top = 14.dp, bottom = 6.dp))
+    if (!allowed) {
+        LinkRow("Allow contacts so you can call people from here") {
+            act.requestPerm(android.Manifest.permission.READ_CONTACTS) { allowed = it }
+        }
+        return
+    }
+    Row(Modifier.fillMaxWidth().border(1.dp, Faint, RoundedCornerShape(24.dp)).padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.foundation.text.BasicTextField(q, { q = it; pick = null }, singleLine = true,
+            textStyle = androidx.compose.ui.text.TextStyle(color = Fg, fontSize = 17.sp), cursorBrush = androidx.compose.ui.graphics.SolidColor(Sand),
+            modifier = Modifier.weight(1f).padding(vertical = 12.dp),
+            decorationBox = { inner -> Box { if (q.isEmpty()) Text("Call someone…", color = Faint, fontSize = 17.sp); inner() } })
+        Text("🎤", fontSize = 20.sp, modifier = Modifier.combinedClickable { act.listen("Who do you want to call?") { it?.let { t -> q = t } } }.padding(10.dp))
+    }
+    val list = if (q.length >= 2) found else starred
+    if (q.length >= 2 && found.isEmpty()) Note("No contact called “$q”.")
+    if (q.length < 2 && list.isEmpty()) Note("Star people in your Contacts app and they'll be here, ready to call.")
+    if (q.length < 2 && list.isNotEmpty()) FlowRow(Modifier.padding(top = 6.dp)) {
+        list.forEach { p -> Chip((if (pick == p) "▾ " else "") + p.name.substringBefore(' ').take(14)) { pick = if (pick == p) null else p } }
+    }
+    val show = if (q.length >= 2) found else listOfNotNull(pick)
+    show.forEach { p ->
+        Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
+            Text(p.name + "   " + p.number, color = Fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            FlowRow {
+                Chip("📞 call") { Find.callNow(act, p) }
+                Chip("WhatsApp call") { Find.whatsappCall(act, p, video = false) }
+                Chip("WhatsApp video") { Find.whatsappCall(act, p, video = true) }
+                Chip("text") { Find.text(act, p) }
+                Chip("chat") { Find.whatsapp(act, p) }
+            }
+        }
     }
 }

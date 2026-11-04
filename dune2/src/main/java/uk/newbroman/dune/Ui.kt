@@ -832,6 +832,12 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Start automatically in the car", s.driveAuto) }
         item { Toggle("Read new messages aloud", s.driveReadAloud) }
         item { Toggle("Landscape Drive screen", s.driveLandscape) }
+        item {
+            Toggle("Turn the Wi-Fi hotspot on in Drive mode", s.driveHotspot)
+            if (s.driveHotspot.value) Toggle("…and off again when Drive mode ends", s.driveHotspotOff)
+            if (s.driveHotspot.value && !SplitService.enabled()) LinkRow("Turn on Dune's accessibility service (needed to flip the hotspot switch)") { SplitService.settings(act) }
+            if (s.driveHotspot.value) Note("Android doesn't let apps switch the hotspot directly, so Dune opens the hotspot page, flips the switch and comes back.")
+        }
         item { WakeWordSettings(vm) }
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }

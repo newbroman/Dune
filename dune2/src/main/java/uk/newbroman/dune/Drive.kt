@@ -83,7 +83,15 @@ object Drive {
     }
 
     fun set(ctx: Context, on: Boolean) {
+        val changed = active.value != on
         active.value = on
+        // Wi-Fi hotspot for the car's head unit (Settings › Drive mode)
+        val p = ctx.getSharedPreferences("dune", Context.MODE_PRIVATE)
+        if (changed && p.getBoolean("driveHotspot", true) && (on || p.getBoolean("driveHotspotOff", true))) {
+            val s = SplitService.instance
+            if (s != null) s.hotspot(ctx, on, if (on) intent(ctx) else null)
+            else if (on) ctx.toast("To switch the hotspot on in Drive mode, turn on Dune's accessibility service (Settings › Drive mode)")
+        }
         ctx.getSharedPreferences("dune", Context.MODE_PRIVATE).edit().putBoolean("driveActive", on).apply()
         WakeWord.sync(ctx)
         if (!on) {

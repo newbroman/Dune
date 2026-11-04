@@ -183,6 +183,44 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
             .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 60)).build(), null, null)
     }
 
+    /**
+     * Wi-Fi hotspot on or off, the way you would by hand: Android lets no ordinary app switch tethering, so this opens
+     * the hotspot settings page, flips its main switch if it isn't already where it should be, then goes [back].
+     */
+    fun hotspot(from: Context, on: Boolean, back: Intent?) {
+        main.removeCallbacksAndMessages(null)
+        val me = ++run
+        trace.setLength(0)
+        skip = setOf(packageName, "com.android.systemui")
+        note("Hotspot ${if (on) "on" else "off"} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} · Android ${android.os.Build.VERSION.RELEASE}")
+        val pages = listOf(
+            Intent().setClassName("com.android.settings", "com.android.settings.Settings\$WifiTetherSettingsActivity"),
+            Intent("android.settings.WIFI_TETHER_SETTINGS"),
+            Intent().setClassName("com.android.settings", "com.android.settings.TetherSettings"),
+            Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
+        if (pages.none { i -> runCatching { startActivity(Intent(i).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess }) { toast("Couldn't open the hotspot settings"); return }
+        fun done(msg: String) { note(msg); toast(msg); back?.let { b -> main.postDelayed({ runCatching { startActivity(Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, 600) } }
+        // the page's main switch: the first on/off switch, preferring one labelled hotspot
+        val pickSwitch: (android.view.accessibility.AccessibilityNodeInfo) -> android.view.accessibility.AccessibilityNodeInfo? = { root ->
+            if ((root.packageName?.toString() ?: "") != "com.android.settings") null else {
+                val sw = walk(root).filter { it.isVisibleToUser && it.isCheckable }
+                sw.firstOrNull { n -> generateSequence(n) { it.parent }.take(4).any { p ->
+                    walk(p).take(30).any { listOfNotNull(it.text, it.contentDescription).any { t -> t.toString().contains("hotspot", true) || t.toString().contains("tether", true) } } } }
+                    ?: sw.firstOrNull()
+            }
+        }
+        waitFor(me, "the hotspot switch", pickSwitch, onMiss = { toast("Hotspot: couldn't find the switch – turn it on yourself"); back?.let { b -> runCatching { startActivity(Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } } }) { sw ->
+            if (sw.isChecked == on) { done(if (on) "Hotspot already on" else "Hotspot already off"); return@waitFor }
+            click(sw)
+            main.postDelayed({
+                if (me != run) return@postDelayed
+                val now = roots().firstNotNullOfOrNull { pickSwitch(it) }
+                if (now == null || now.isChecked == on) done(if (on) "Hotspot on" else "Hotspot off")
+                else { note("switch didn't change"); dump(); done("Hotspot: the switch didn't change – check it yourself") }
+            }, 1500)
+        }
+    }
+
     private fun startSecond(from: Context, b: Intent) {
         val i = Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         runCatching { from.startActivity(i) }.recoverCatching { startActivity(i) }
