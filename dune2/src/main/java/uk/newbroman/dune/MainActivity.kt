@@ -51,12 +51,12 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Ask Android's speech recogniser for one phrase. */
-    fun listen(prompt: String, cb: (String?) -> Unit) {
+    fun listen(prompt: String, lang: String = "en-GB", cb: (String?) -> Unit) {
         WakeWord.pause(this)
         listenCallback = { r -> cb(r); WakeWord.resume(this) }
         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
             .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB")
+            .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
             .putExtra(RecognizerIntent.EXTRA_PROMPT, prompt)
         try { speechLauncher.launch(i) } catch (e: Exception) { listenCallback = null; WakeWord.resume(this); toast("Speech recognition isn't available") }
     }
