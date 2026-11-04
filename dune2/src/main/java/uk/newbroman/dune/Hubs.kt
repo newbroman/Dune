@@ -324,8 +324,9 @@ object HomeHub : Hub {
             item { Fold(vm, "hubs", "Hubs") {
                 Column(Modifier.padding(top = 4.dp)) {
                     Hubs.enabled(s).filter { it.id != "home" }.forEach { h -> androidx.compose.runtime.key(h.id) {
-                        val line = h.summary(vm)
-                        if (line != null) Row(Modifier.fillMaxWidth().combinedClickable { vm.jumpHub = h.id }.padding(vertical = 7.dp),
+                        // every hub has a line, even with nothing to report yet (then just its name)
+                        val line = h.summary(vm) ?: h.title
+                        Row(Modifier.fillMaxWidth().combinedClickable { vm.jumpHub = h.id }.padding(vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Text(h.glyph, color = Sand, fontSize = 16.sp, modifier = Modifier.padding(end = 12.dp))
                             Text(line, color = Fg, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
