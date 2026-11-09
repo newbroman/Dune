@@ -68,6 +68,16 @@ object LearnHub : Hub {
         val prefs = remember { act.getSharedPreferences("dune", 0) }
         var stats by remember { mutableStateOf(ClozeStats.parse(prefs.getString("clozeSummary", null))) }
         var more by remember { mutableStateOf(false) }
+        // Tongues only runs while this hub is on screen. Kept alive next door, its hands-free mode used to
+        // restart (and re-say the same card) every time the page came back into view – e.g. on any hub switch.
+        // Now: away → paused and silent; back → quiet, or a fresh card read aloud if Settings › Learn says so.
+        LaunchedEffect(active, vm.resumeTick) {
+            val v = act.cloze().view
+            if (!active) { if (vm.screen != Screen.CLOZE) { v.evaluateJavascript(TonguesVoice.HUSH, null); v.onPause() }; return@LaunchedEffect }
+            v.evaluateJavascript(TonguesVoice.HUSH, null)
+            v.onResume()
+            if (vm.store.learnSpeakOnOpen.value) { delay(400); v.evaluateJavascript(TonguesVoice.FRESH_CARD, null) }
+        }
         // Read Cloze's progress from the page now and then, for this hub and the Home line.
         LaunchedEffect(active) {
             while (active) {
@@ -112,9 +122,20 @@ object LearnHub : Hub {
     }
 }
 
+/** What Dune says to the Tongues page when the Learn hub comes and goes. */
+object TonguesVoice {
+    /** Stop hands-free and any speech; the card stays on screen, silent. */
+    const val HUSH = "(function(){try{if(typeof hf!=='undefined'&&hf&&typeof hfStop==='function')hfStop(true);" +
+        "if(window.speechSynthesis)speechSynthesis.cancel();}catch(e){}})()"
+    /** Move on to the next card and read it out (hands-free if it was on, otherwise just the sentence). */
+    const val FRESH_CARD = "(function(){try{if(typeof deck==='undefined'||!deck||typeof next!=='function')return;" +
+        "pos++;next(true);if(card!=null&&deck.items[card])speak(deck.items[card][0]);}catch(e){}})()"
+}
+
 /** Cloze on its own, full screen. */
 @Composable
 fun ClozeFull() {
     val act = LocalContext.current as MainActivity
+    LaunchedEffect(Unit) { act.cloze().view.onResume() }
     AndroidView(factory = { act.cloze().detached() }, modifier = Modifier.fillMaxSize().background(Bg).systemBarsPadding().imePadding())
 }

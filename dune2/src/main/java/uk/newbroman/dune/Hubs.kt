@@ -279,9 +279,18 @@ fun AppsRow(vm: LauncherVM, hub: String, packages: List<String>, words: List<Str
                     DropdownMenuItem(text = { Text(a.label) },
                         leadingIcon = { a.icon?.let { Image(it, null, Modifier.size(28.dp)) } },
                         // ✕ takes the app off this hub's list (it stays installed)
-                        trailingIcon = { Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
-                            HubAppEdits.remove(vm.store, hub, a.pkg); if (lastPkg == a.pkg) vm.store.hubLastApp.set((lastMap - hub).entries.joinToString("\n") { "${it.key}=${it.value}" }); load()
-                        }.padding(8.dp)) },
+                        // ☆ pins it to Home's favourites; ✕ takes the app off this hub's list (it stays installed)
+                        trailingIcon = { Row(verticalAlignment = Alignment.CenterVertically) {
+                            val entry = vm.apps.firstOrNull { it.pkg == a.pkg }
+                            val fav = entry != null && entry.key in vm.store.favourites
+                            if (entry != null) Text(if (fav) "★" else "☆", color = if (fav) Sand else Dim, fontSize = 16.sp, modifier = Modifier.combinedClickable {
+                                vm.store.toggleFavourite(entry.key)
+                                ctx.toast(if (fav) "Removed from favourites" else "Added to favourites")
+                            }.padding(8.dp))
+                            Text("✕", color = Dim, fontSize = 14.sp, modifier = Modifier.combinedClickable {
+                                HubAppEdits.remove(vm.store, hub, a.pkg); if (lastPkg == a.pkg) vm.store.hubLastApp.set((lastMap - hub).entries.joinToString("\n") { "${it.key}=${it.value}" }); load()
+                            }.padding(8.dp))
+                        } },
                         onClick = { list = null; rememberLast(a.pkg); open(a) })
                 }
                 DropdownMenuItem(text = { Text("+ add an app…", color = Sand) }, onClick = { list = null; picking = true })

@@ -325,6 +325,8 @@ class MainActivity : ComponentActivity() {
         vm.onResume()
         vm.media.listen()   // notification access may have just been granted
         WakeWord.sync(this)   // in the car: start the wake word now Dune is on screen (it can't start from the background)
-        listOfNotNull(rozmowaWeb, clozeWeb, wellsWeb).forEach { it.view.onResume() }
+        listOfNotNull(rozmowaWeb, wellsWeb).forEach { it.view.onResume() }
+        // Tongues resumes only where it's shown (the Learn hub resumes it itself), so it can't talk from off screen
+        if (vm.screen == Screen.CLOZE) clozeWeb?.view?.onResume()
     }
 }

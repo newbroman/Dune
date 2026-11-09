@@ -243,12 +243,16 @@ fun ShopScreen(vm: LauncherVM) {
     }
     LaunchedEffect(q) { if (q.isBlank()) vm.screen = Screen.HOME }
     if (stores.isEmpty()) { LaunchedEffect(Unit) { act.toast("Pick some shops first"); vm.screen = Screen.HOME }; return }
+    // Back (on-screen ← or the phone's own back) steps back through the shop's pages – item → results –
+    // and only leaves for the Shop hub once that shop is back at its first page.
+    val back = {
+        val w = views[stores[pager.currentPage].id]
+        if (w?.canGoBack() == true) w.goBack() else { vm.jumpHub = ShopHub.id; vm.goHome() }
+    }
+    androidx.activity.compose.BackHandler { back() }
     Column(Modifier.fillMaxSize().background(Bg).systemBarsPadding().imePadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("←", color = Dim, fontSize = 20.sp, modifier = Modifier.combinedClickable {
-                val w = views[stores[pager.currentPage].id]
-                if (w?.canGoBack() == true) w.goBack() else { vm.jumpHub = ShopHub.id; vm.goHome() }
-            }.padding(10.dp))
+            Text("←", color = Dim, fontSize = 20.sp, modifier = Modifier.combinedClickable { back() }.padding(10.dp))
             Text("“$q”", color = Fg, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             Text("★", color = Sand, fontSize = 18.sp, modifier = Modifier.combinedClickable {
                 val s = stores[pager.currentPage]; val w = views[s.id]

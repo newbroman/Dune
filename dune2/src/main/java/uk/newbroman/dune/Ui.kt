@@ -362,13 +362,17 @@ internal fun FavouritesBlock(vm: LauncherVM) {
     val s = vm.store
     // apps and web pages ("web:<url>") side by side
     val favs: List<Any> = s.favourites.mapNotNull { k -> vm.appByKey(k) ?: vm.favWeb(k) }
+    var picking by remember { mutableStateOf(false) }
+    if (picking) AppPicker(vm, exclude = remember(picking) { favs.filterIsInstance<AppEntry>().map { it.pkg }.toSet() },
+        onPick = { pkg -> vm.apps.firstOrNull { it.pkg == pkg }?.let { if (it.key !in s.favourites) s.toggleFavourite(it.key) } },
+        onDismiss = { picking = false })
+    Header("Favourites", "+ add") { picking = true }
     if (favs.isEmpty()) {
-        Header("Favourites")
-        Text("Long-press an app in the app list to pin it here", color = Faint, fontSize = 15.sp)
+        Text("Tap + add, or long-press an app in the app list, to pin it here", color = Faint, fontSize = 15.sp)
         return
     }
     // Icons only, five to a row
-    Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         favs.chunked(5).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { f -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
@@ -841,6 +845,13 @@ fun SettingsScreen(vm: LauncherVM) {
         item { WakeWordSettings(vm) }
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
+
+        section("Learn")
+        item {
+            Toggle("Read a new card aloud when you open Learn", s.learnSpeakOnOpen)
+            Note("Off: Tongues stays quiet until you tap it, and pauses (hands-free too) whenever you leave the Learn hub. " +
+                "On: each time you open Learn it moves to the next card and says it.")
+        }
 
         section("Camera")
         item {

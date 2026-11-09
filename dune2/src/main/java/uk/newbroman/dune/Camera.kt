@@ -104,11 +104,35 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.tan
 
-/** The phone's own camera app (night mode, pro mode, 200 MP… whatever it has). */
+/**
+ * The phone's own camera app (night mode, pro mode, 200 MP… whatever it has).
+ * Opened the way its home-screen icon opens it, not with the "still image camera" intent: some
+ * makers' camera apps (seen on the Ulefone) start in a restricted mode from that intent and shut
+ * after a minute complaining about security permissions. The intent is only the fallback.
+ */
 object PhoneCamera {
-    fun open(ctx: Context, video: Boolean): Boolean = ctx.tryStart(
-        android.content.Intent(if (video) MediaStore.INTENT_ACTION_VIDEO_CAMERA else MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+    /** The package that answers "take a photo" – the phone's default camera app. */
+    fun pkg(ctx: Context): String? {
+        val pm = ctx.packageManager
+        val intents = listOf(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA, MediaStore.ACTION_IMAGE_CAPTURE)
+        intents.forEach { a ->
+            pm.resolveActivity(android.content.Intent(a), android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)?.activityInfo?.packageName
+                ?.takeIf { it != "android" && it != ctx.packageName && pm.getLaunchIntentForPackage(it) != null }?.let { return it }
+        }
+        return intents.flatMap { a -> pm.queryIntentActivities(android.content.Intent(a), 0).map { it.activityInfo.packageName } }
+            .firstOrNull { it != ctx.packageName && pm.getLaunchIntentForPackage(it) != null }
+    }
+
+    fun open(ctx: Context, video: Boolean): Boolean {
+        pkg(ctx)?.let { p ->
+            ctx.packageManager.getLaunchIntentForPackage(p)?.let { i ->
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+                if (ctx.tryStart(i)) return true
+            }
+        }
+        return ctx.tryStart(android.content.Intent(if (video) MediaStore.INTENT_ACTION_VIDEO_CAMERA else MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
 }
 
 /** One of the phone's rear cameras, as CameraX sees it. */
