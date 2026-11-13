@@ -118,6 +118,7 @@ object Find {
         is Cmd.Media -> "Media: ${cmd.action}"
         is Cmd.TimeInPolish -> "The time in Polish"
         is Cmd.PhraseOfDay -> "Phrase of the day"
+        is Cmd.Send -> (if (cmd.via == "sms") "Text " else if (cmd.via == "whatsapp") "WhatsApp " else "Message ") + cmd.rest
         is Cmd.ReadMessages -> "Read my messages"
         is Cmd.DriveMode -> if (cmd.on) "Start Drive mode" else "Leave Drive mode"
         is Cmd.Reply, is Cmd.Open, is Cmd.Unknown -> null

@@ -521,15 +521,19 @@ private fun ReplyConfirm(vm: LauncherVM, r: PendingReply) {
     val act = LocalContext.current as MainActivity
     var left by remember(r) { mutableIntStateOf(6) }
     LaunchedEffect(r) {
-        Speaker.speak(act, "Replying to ${r.to.title}: ${r.text}. Sending in a few seconds.")
+        Speaker.speak(act, (if (r.out != null) "Sending to " else "Replying to ") + "${r.who}: ${r.text}. Sending in a few seconds.")
         while (left > 0) { delay(1000); left = maxOf(0, left - 1) }
-        val ok = NotifService.sendReply(act, r.to, r.text)
-        Speaker.speak(act, if (ok) "Sent" else "Sorry, that didn't send")
         vm.pendingReply = null
+        val o = r.out
+        if (o != null) Messaging.send(act, o) { _, say -> Speaker.speak(act, say) }
+        else {
+            val ok = r.to?.let { NotifService.sendReply(act, it, r.text) } == true
+            Speaker.speak(act, if (ok) "Sent" else "Sorry, that didn't send")
+        }
     }
     Box(Modifier.fillMaxSize().background(Color(0xEE000000)).padding(24.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("To ${r.to.title}", color = Dim, fontSize = 18.sp)
+            Text("To ${r.who}", color = Dim, fontSize = 18.sp)
             Spacer(Modifier.height(10.dp))
             Text("“${r.text}”", color = Fg, fontSize = 26.sp, textAlign = TextAlign.Center)
             Spacer(Modifier.height(24.dp))

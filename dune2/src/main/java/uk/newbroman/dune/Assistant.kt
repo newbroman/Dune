@@ -20,6 +20,8 @@ sealed class Cmd {
     data class Spotify(val q: String?) : Cmd()
     data class Media(val action: String) : Cmd()        // play, pause, next, previous
     data class Reply(val text: String) : Cmd()
+    /** "text Anna I'm late": [rest] is the contact's name then the message (split against your contacts later). */
+    data class Send(val rest: String, val via: String?) : Cmd()
     data class Dial(val number: String) : Cmd()
     data class DriveMode(val on: Boolean) : Cmd()
     object TimeInPolish : Cmd()
@@ -58,6 +60,13 @@ object Assistant {
         if (Regex("^(read|what are) (out )?(my |the )?(new |latest )?messages?$").matches(s)) return Cmd.ReadMessages
         Regex("^(reply|answer|respond)( with| saying| say)? (.+)$").find(s)?.let {
             return Cmd.Reply(t.substring(t.length - s.length).substring(it.groups[3]!!.range.first).trim())
+        }
+        // New messages: "send a message to Anna saying …", "text Tom …", "WhatsApp Mum …", "tell Jo …"
+        Regex("^(?:send |write )?(?:a |an )?(whatsapp|text|sms|message)(?: message)?(?: to)? (.+)$|^(tell) (?!me\\b)(.+)$").find(s)?.let { m ->
+            val word = m.groups[1]?.value ?: m.groups[3]!!.value
+            val g = m.groups[2] ?: m.groups[4]!!
+            val via = when (word) { "whatsapp" -> "whatsapp"; "text", "sms" -> "sms"; else -> null }
+            return Cmd.Send(t.substring(t.length - s.length).substring(g.range.first).trim(), via)
         }
 
         // Time / phrase
@@ -187,6 +196,18 @@ object Assistant {
                 if (vm.screen != Screen.DRIVE) vm.screen = Screen.DRIVE   // the confirm-and-send panel lives there
                 null
             }
+            is Cmd.Send -> {
+                val (o, why) = Messaging.prepare(act, cmd.rest, cmd.via)
+                if (o == null) return why
+                if (vm.screen != Screen.DRIVE) vm.screen = Screen.DRIVE   // the confirm-and-send panel lives there
+                if (o.text.isBlank()) {
+                    Speaker.speak(act, "What's the message for ${o.to.name}?")
+                    act.window.decorView.postDelayed({
+                        act.listen("Message for ${o.to.name}") { t -> if (!t.isNullOrBlank()) vm.pendingReply = PendingReply(null, t, o.copy(text = t)) }
+                    }, 1800)
+                } else vm.pendingReply = PendingReply(null, o.text, o)
+                null
+            }
             is Cmd.Dial -> { act.tryStart(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + cmd.number))); "Calling ${cmd.number}" }
             is Cmd.DriveMode -> { Drive.set(act, cmd.on); if (cmd.on) vm.screen = Screen.DRIVE else vm.goHome(); null }
             Cmd.TimeInPolish -> { Speaker.speak(act, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL); PolishTime.spoken(LocalDateTime.now()) }
@@ -218,7 +239,10 @@ object Assistant {
     }
 }
 
-data class PendingReply(val to: NotifItem, val text: String)
+/** A message waiting to go: a reply to [to]'s notification, or a new message [out]. */
+data class PendingReply(val to: NotifItem?, val text: String, val out: Outgoing? = null) {
+    val who get() = out?.let { "${it.to.name} ${it.how}" } ?: to?.title.orEmpty()
+}
 
 const val SPOTIFY = "com.spotify.music"
 const val BBC_SOUNDS = "com.bbc.sounds"

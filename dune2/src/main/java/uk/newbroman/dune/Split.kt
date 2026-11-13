@@ -228,6 +228,28 @@ class SplitService : android.accessibilityservice.AccessibilityService() {
         }
     }
 
+    /**
+     * WhatsApp is open on a chat with a message written in (Dune opened it): press its Send button, then go back
+     * to [back]. Looks only at WhatsApp's own window, for a few seconds.
+     */
+    fun whatsappSend(back: Intent?, done: (Boolean) -> Unit) {
+        main.removeCallbacksAndMessages(null)
+        val me = ++run
+        trace.setLength(0)
+        skip = setOf(packageName, "com.android.systemui")
+        note("WhatsApp send · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}")
+        fun home() { back?.let { b -> main.postDelayed({ runCatching { startActivity(Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } }, 900) } }
+        val findSend: (android.view.accessibility.AccessibilityNodeInfo) -> android.view.accessibility.AccessibilityNodeInfo? = { root ->
+            if (!(root.packageName?.toString() ?: "").startsWith("com.whatsapp")) null
+            else find(root) { n -> (n.viewIdResourceName ?: "").endsWith(":id/send") }
+                ?: find(root) { n -> n.contentDescription?.toString()?.equals("Send", true) == true }
+        }
+        waitFor(me, "WhatsApp's Send button", findSend, tries = 32, onMiss = { done(false); home() }) { b ->
+            click(b)
+            note("pressed Send"); done(true); home()
+        }
+    }
+
     private fun startSecond(from: Context, b: Intent) {
         val i = Intent(b).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
         runCatching { from.startActivity(i) }.recoverCatching { startActivity(i) }
