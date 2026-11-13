@@ -115,6 +115,7 @@ object Find {
         is Cmd.Translate -> "Translate “${cmd.text}” into Polish"
         is Cmd.Spotify -> if (cmd.q != null) "Play “${cmd.q}” on Spotify" else "Open Spotify"
         is Cmd.Dial -> "Call ${cmd.number}"
+        is Cmd.CallPerson -> (if (cmd.video) "Video call " else if (cmd.whatsapp) "WhatsApp call " else "Call ") + cmd.name
         is Cmd.Media -> "Media: ${cmd.action}"
         is Cmd.TimeInPolish -> "The time in Polish"
         is Cmd.PhraseOfDay -> "Phrase of the day"

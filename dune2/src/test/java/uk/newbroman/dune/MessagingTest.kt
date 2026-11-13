@@ -29,4 +29,12 @@ class MessagingTest {
         assertEquals(Cmd.ReadMessages, Assistant.interpret("read my messages"))
         assertEquals(Cmd.Reply("ok"), Assistant.interpret("reply ok"))
     }
+
+    @Test fun parsesCalls() {
+        assertEquals(Cmd.Dial("07700900123"), Assistant.interpret("call 07700 900123"))
+        assertEquals(Cmd.CallPerson("anna", false, false), Assistant.interpret("Call Anna"))
+        assertEquals(Cmd.CallPerson("mum", true, false), Assistant.interpret("WhatsApp call Mum"))
+        assertEquals(Cmd.CallPerson("mum", true, false), Assistant.interpret("ring mum on WhatsApp"))
+        assertEquals(Cmd.CallPerson("jo", true, true), Assistant.interpret("video call Jo"))
+    }
 }

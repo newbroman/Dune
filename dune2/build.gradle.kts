@@ -14,8 +14,8 @@ android {
         applicationId = "uk.newbroman.dune2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 59
-        versionName = "2.55"
+        versionCode = 60
+        versionName = "2.56"
         // phones only: keeps the wake-word engine's native code from tripling the APK
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }

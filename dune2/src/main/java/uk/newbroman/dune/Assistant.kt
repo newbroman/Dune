@@ -23,6 +23,8 @@ sealed class Cmd {
     /** "text Anna I'm late": [rest] is the contact's name then the message (split against your contacts later). */
     data class Send(val rest: String, val via: String?) : Cmd()
     data class Dial(val number: String) : Cmd()
+    /** "call Anna", "WhatsApp call Mum", "video call Jo" */
+    data class CallPerson(val name: String, val whatsapp: Boolean, val video: Boolean) : Cmd()
     data class DriveMode(val on: Boolean) : Cmd()
     object TimeInPolish : Cmd()
     object PhraseOfDay : Cmd()
@@ -62,7 +64,7 @@ object Assistant {
             return Cmd.Reply(t.substring(t.length - s.length).substring(it.groups[3]!!.range.first).trim())
         }
         // New messages: "send a message to Anna saying …", "text Tom …", "WhatsApp Mum …", "tell Jo …"
-        Regex("^(?:send |write )?(?:a |an )?(whatsapp|text|sms|message)(?: message)?(?: to)? (.+)$|^(tell) (?!me\\b)(.+)$").find(s)?.let { m ->
+        Regex("^(?:send |write )?(?:a |an )?(whatsapp|text|sms|message)(?: message)?(?: to)? (?!call\\b)(.+)$|^(tell) (?!me\\b)(.+)$").find(s)?.let { m ->
             val word = m.groups[1]?.value ?: m.groups[3]!!.value
             val g = m.groups[2] ?: m.groups[4]!!
             val via = when (word) { "whatsapp" -> "whatsapp"; "text", "sms" -> "sms"; else -> null }
@@ -115,6 +117,10 @@ object Assistant {
 
         // Calls
         Regex("^(call|ring|phone|dial) ([+\\d][\\d ]{5,})$").find(s)?.let { return Cmd.Dial(it.groupValues[2].replace(" ", "")) }
+        Regex("^(?:make a )?(whatsapp |video )?(?:call|ring|phone)(?: up)? (.+?)(?: on (whatsapp|video))?$").find(s)?.let { m ->
+            val kind = m.groupValues[1].trim() + " " + m.groupValues[3]
+            return Cmd.CallPerson(m.groupValues[2], whatsapp = "whatsapp" in kind || "video" in kind, video = "video" in kind)
+        }
 
         // Web
         Regex("^(search|google|look up|search for|search the web for)( for)? (.+)$").find(s)?.let { return Cmd.Search(orig(t, s, it.groups[3]!!.range)) }
@@ -207,6 +213,14 @@ object Assistant {
                     }, 1800)
                 } else vm.pendingReply = PendingReply(null, o.text, o)
                 null
+            }
+            is Cmd.CallPerson -> {
+                if (!Find.canReadContacts(act)) return "Dune needs to see your contacts first"
+                val c = Messaging.match(cmd.name, Messaging.contacts(act))?.contact ?: return "I couldn't find ${cmd.name} in your contacts"
+                val p = Person(c.name, c.number, c.id)
+                val what = if (cmd.video) "Video calling" else if (cmd.whatsapp) "WhatsApp calling" else "Calling"
+                act.window.decorView.postDelayed({ if (cmd.whatsapp) Find.whatsappCall(act, p, cmd.video) else Find.callNow(act, p) }, 1500)
+                "$what ${c.name}"
             }
             is Cmd.Dial -> { act.tryStart(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + cmd.number))); "Calling ${cmd.number}" }
             is Cmd.DriveMode -> { Drive.set(act, cmd.on); if (cmd.on) vm.screen = Screen.DRIVE else vm.goHome(); null }
