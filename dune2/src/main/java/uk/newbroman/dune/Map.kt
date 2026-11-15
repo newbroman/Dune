@@ -79,6 +79,7 @@ val MAP_SOURCES = listOf(
     MapSource("mapy-traffic", "Mapy.com · Traffic", site = { mapyUrl("traffic", it) }),
     MapSource("radar", "Rain radar (RainViewer)", layer = "dark", radar = true),
     MapSource("windy", "Windy · radar and forecast", site = { windyUrl(it) }),
+    MapSource("lidarlens", "LiDAR Lens · 3D terrain (Wales/England)", site = { lidarLensUrl(it) }),
     MapSource("dark", "Dune dark", layer = "dark"),
     MapSource("osm", "OpenStreetMap", layer = "osm"),
     MapSource("topo", "OpenTopoMap (contours)", layer = "topo"),
@@ -92,6 +93,16 @@ fun windyUrl(l: Location?): String {
     return String.format(Locale.US, "https://embed.windy.com/embed2.html?lat=%.4f&lon=%.4f&detailLat=%.4f&detailLon=%.4f" +
         "&zoom=%d&level=surface&overlay=radar&product=radar&menu=&message=true&marker=true&calendar=now&type=map" +
         "&location=coordinates&detail=&metricWind=mph&metricTemp=%%C2%%B0C&radarRange=-1", lat, lon, lat, lon, if (l != null) 8 else 5)
+}
+
+/**
+ * LiDAR Lens (sarsen.org): the 1 m LiDAR terrain in 3D with a movable "lens", in its field layout. Centred on
+ * you when there's a fix, otherwise on Newborough Warren; the view settings are the ones Martin chose.
+ */
+fun lidarLensUrl(l: Location?): String {
+    val lat = l?.latitude ?: 53.14740; val lon = l?.longitude ?: -4.35994
+    return String.format(Locale.US, "https://lidarlens.sarsen.org/?ui=field#c=%.5f%%2C%.5f%%2C15.25&l=%.5f%%2C%.5f", lat, lon, lat, lon) +
+        "&mode=10&az=66&el=35&ve=2&rad=10&ct=1.1&gm=1&op=1&ls=266&ramp=grey&auto=1&fs=1&sm=0&base=sat&ui=field"
 }
 
 /** Mapy.com's documented link: centre is longitude first. */
@@ -187,7 +198,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val h = r.url.host ?: return false
-                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h.endsWith("windy.com") || h == "appassets.androidplatform.net") return false
+                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h.endsWith("windy.com") || h.endsWith("sarsen.org") || h == "appassets.androidplatform.net") return false
                     act.tryStart(Intent(Intent.ACTION_VIEW, r.url)); return true
                 }
             }
