@@ -154,13 +154,21 @@ private fun ConvoRow(vm: LauncherVM, c: Convo, open: Boolean, toggle: () -> Unit
             }
         }
         if (open) Column(Modifier.padding(start = 50.dp, top = 6.dp)) {
-            c.entries.takeLast(8).forEach { e ->
-                Text(ago(e.time) + "  " + e.text, color = Fg, fontSize = 14.sp, modifier = Modifier.padding(vertical = 2.dp))
-            }
             val person by produceState<Person?>(null, c.who) { value = withContext(Dispatchers.IO) { Find.people(act, c.who, 1).firstOrNull() } }
+            // Tapping a message (or "open") opens the conversation in its app
+            val openIt = {
+                c.live.firstOrNull()?.let { n -> Actions.openNotification(act, n) }
+                    ?: run { if (!Actions.openChat(act, c.pkg, c.who)) launchPkg(vm, c.pkg) }
+            }
+            c.entries.takeLast(8).forEach { e ->
+                Text(ago(e.time) + "  " + e.text, color = Fg, fontSize = 14.sp,
+                    modifier = Modifier.fillMaxWidth().combinedClickable { openIt() }.padding(vertical = 3.dp))
+            }
+            if (c.entries.isEmpty()) c.live.firstOrNull()?.let { n ->
+                Text(n.text, color = Fg, fontSize = 14.sp, modifier = Modifier.fillMaxWidth().combinedClickable { openIt() }.padding(vertical = 3.dp))
+            }
             FlowRow(Modifier.padding(top = 6.dp)) {
-                c.live.firstOrNull()?.let { n -> Chip("open") { Actions.openNotification(act, n) } }
-                    ?: Chip("open ${vm.labelFor(c.pkg)}") { launchPkg(vm, c.pkg) }
+                Chip("open in ${vm.labelFor(c.pkg)}") { openIt() }
                 person?.let { p ->
                     Chip("call") { Find.call(act, p) }
                     Chip("text") { Find.text(act, p) }
@@ -168,18 +176,29 @@ private fun ConvoRow(vm: LauncherVM, c: Convo, open: Boolean, toggle: () -> Unit
                 }
                 if (c.live.isNotEmpty()) Chip("✕ clear") { c.live.forEach { n -> NotifService.instance?.cancelNotification(n.key) } }
             }
-            c.replyable?.let { n -> ReplyBox(n) }
+            // Reply: through the notification while it's there; after that, as a new WhatsApp or text to them
+            val via = when {
+                c.pkg.startsWith("com.whatsapp") -> "whatsapp"
+                c.kind == "message" && (c.pkg.contains("messaging") || c.pkg.contains("mms") || c.pkg.contains("sms")) -> "sms"
+                else -> null
+            }
+            val n = c.replyable
+            if (n != null || (person != null && via != null)) ReplyBox(c.who, n, person?.let { p -> via?.let { Outgoing(p, "", it) } })
         }
     }
 }
 
 @Composable
-private fun ReplyBox(n: NotifItem) {
+private fun ReplyBox(who: String, n: NotifItem?, fallback: Outgoing?) {
     val act = LocalContext.current as MainActivity
-    var text by remember(n.key) { mutableStateOf("") }
+    var text by remember(who) { mutableStateOf("") }
     val send = {
-        if (text.isNotBlank()) {
-            if (NotifService.sendReply(act, n, text.trim())) { act.toast("Sent"); text = "" } else act.toast("Couldn't send – open the app instead")
+        val t = text.trim()
+        if (t.isNotBlank()) {
+            if (n != null && NotifService.sendReply(act, n, t)) { act.toast("Sent"); text = "" }
+            else if (fallback != null) {
+                Messaging.send(act, fallback.copy(text = t), android.content.Intent(act, MainActivity::class.java)) { ok, say -> act.toast(say); if (ok) text = "" }
+            } else act.toast("Couldn't send – open the app instead")
         }
     }
     Row(Modifier.fillMaxWidth().padding(top = 6.dp).border(1.dp, Faint, RoundedCornerShape(20.dp)).padding(start = 14.dp),
@@ -188,8 +207,8 @@ private fun ReplyBox(n: NotifItem) {
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(onSend = { send() }),
             modifier = Modifier.weight(1f).padding(vertical = 10.dp),
-            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Reply to ${n.title}", color = Faint, fontSize = 16.sp); inner() } })
-        Text("🎤", fontSize = 18.sp, modifier = Modifier.combinedClickable { act.listen("Reply to ${n.title}") { it?.let { t -> text = t } } }
+            decorationBox = { inner -> Box { if (text.isEmpty()) Text("Reply to $who", color = Faint, fontSize = 16.sp); inner() } })
+        Text("🎤", fontSize = 18.sp, modifier = Modifier.combinedClickable { act.listen("Reply to $who") { it?.let { t -> text = t } } }
             .padding(horizontal = 8.dp, vertical = 8.dp))
         Text("send", color = Sand, fontSize = 15.sp, modifier = Modifier.combinedClickable { send() }.padding(horizontal = 12.dp, vertical = 8.dp))
     }

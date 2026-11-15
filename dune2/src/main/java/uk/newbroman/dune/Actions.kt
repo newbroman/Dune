@@ -109,19 +109,35 @@ object Actions {
         } catch (_: Throwable) { }
     }
 
+    /**
+     * Open what a notification points at (the chat, the email…), as tapping it in the shade would.
+     * Apps often replace a notification's link when it updates, so the current one is fetched first; if the
+     * link is dead, a message goes to the chat with that person, and anything else just opens the app.
+     */
     fun openNotification(act: Activity, n: NotifItem) {
-        val pi = n.intent
-        if (pi != null) {
+        val fresh = runCatching { NotifService.instance?.activeNotifications?.firstOrNull { it.key == n.key }?.notification?.contentIntent }.getOrNull()
+        val opts = if (Build.VERSION.SDK_INT >= 34) ActivityOptions.makeBasic()
+            .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+            .toBundle() else null
+        for (pi in listOfNotNull(fresh, n.intent).distinct()) {
             try {
-                val opts = if (Build.VERSION.SDK_INT >= 34) ActivityOptions.makeBasic()
-                    .setPendingIntentBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-                    .toBundle() else null
                 pi.send(act, 0, null, null, null, null, opts)
                 if (n.autoCancel) NotifService.instance?.cancelNotification(n.key)
                 return
-            } catch (_: Exception) { }
+            } catch (e: Exception) { android.util.Log.w("Dune", "notification link failed for ${n.pkg}", e) }
         }
+        if (n.isMessage && openChat(act, n.pkg, n.title)) return
         act.launchPackage(n.pkg)
+    }
+
+    /** Open the chat with [who] in [pkg] (WhatsApp or the texting app), if they're in your contacts. */
+    fun openChat(act: Activity, pkg: String, who: String): Boolean {
+        val p = Find.people(act, who, 1).firstOrNull() ?: return false
+        return when {
+            pkg.startsWith("com.whatsapp") -> Find.whatsapp(act, p)
+            pkg.contains("messaging") || pkg.contains("mms") || pkg.contains("sms") -> Find.text(act, p)
+            else -> false
+        }
     }
 
     // ---------- Termux ----------

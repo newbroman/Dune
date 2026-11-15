@@ -95,7 +95,7 @@ object Messaging {
     }
 
     /** Sends it. [done] gets whether it went, and what to say. */
-    fun send(act: MainActivity, o: Outgoing, done: (Boolean, String) -> Unit) {
+    fun send(act: MainActivity, o: Outgoing, back: Intent = Drive.intent(act), done: (Boolean, String) -> Unit) {
         if (o.via == "sms") {
             val go = {
                 val ok = runCatching {
@@ -120,6 +120,6 @@ object Messaging {
         if (!act.tryStart(open)) { done(false, "Couldn't open WhatsApp"); return }
         val helper = SplitService.instance
         if (helper == null) { done(false, "Tap send in WhatsApp. Turn on Dune split screen in accessibility settings and I'll press it for you"); return }
-        helper.whatsappSend(Drive.intent(act)) { ok -> done(ok, if (ok) "Sent" else "I couldn't press send – check WhatsApp") }
+        helper.whatsappSend(back) { ok -> done(ok, if (ok) "Sent" else "I couldn't press send – check WhatsApp") }
     }
 }
