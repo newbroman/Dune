@@ -858,6 +858,18 @@ fun SettingsScreen(vm: LauncherVM) {
             Toggle("Photo and Video open the phone's own camera", s.phoneCamera)
             Note("The phone's camera app has its own extras (night, pro, high-resolution…). Dune's camera keeps 360, panorama and time-lapse – " +
                 "they have their own buttons in the Record hub. Long-press Photo or Video there to use Dune's camera instead.")
+            var astro by remember { mutableStateOf<String?>(null) }
+            LinkRow(if (astro == null) "Check the cameras for night-sky photos" else "Hide the night-sky check") {
+                astro = if (astro == null) AstroCheck.report(act) else null
+            }
+            astro?.let { r ->
+                Text(r, color = Fg, fontSize = 13.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    modifier = Modifier.padding(vertical = 6.dp))
+                Chip("copy report") {
+                    act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Camera check", r))
+                    act.toast("Copied – paste it to Claude")
+                }
+            }
         }
 
         section("Weather")
