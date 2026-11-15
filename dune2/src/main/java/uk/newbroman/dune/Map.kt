@@ -80,6 +80,7 @@ val MAP_SOURCES = listOf(
     MapSource("radar", "Rain radar (RainViewer)", layer = "dark", radar = true),
     MapSource("windy", "Windy · radar and forecast", site = { windyUrl(it) }),
     MapSource("lidarlens", "LiDAR Lens · 3D terrain (Wales/England)", site = { lidarLensUrl(it) }),
+    MapSource("warrenheights", "Warren Heights · 1 m heights and depth to water", site = { warrenHeightsUrl(it) }),
     MapSource("dark", "Dune dark", layer = "dark"),
     MapSource("osm", "OpenStreetMap", layer = "osm"),
     MapSource("topo", "OpenTopoMap (contours)", layer = "topo"),
@@ -104,6 +105,10 @@ fun lidarLensUrl(l: Location?): String {
     return String.format(Locale.US, "https://lidarlens.sarsen.org/?ui=field#c=%.5f%%2C%.5f%%2C15.25&l=%.5f%%2C%.5f", lat, lon, lat, lon) +
         "&mode=10&az=66&el=35&ve=2&rad=10&ct=1.1&gm=1&op=1&ls=266&ramp=grey&auto=1&fs=1&sm=0&base=sat&ui=field"
 }
+
+/** Warren Heights (Newborough Hydrology site): tap a 1 m LiDAR square for its height and depth to water; opens on you. */
+fun warrenHeightsUrl(l: Location?): String = "https://newbroman.github.io/Newborough_Hydrology/warren_heights/" +
+    (l?.let { String.format(Locale.US, "?lat=%.6f&lng=%.6f", it.latitude, it.longitude) } ?: "")
 
 /** Mapy.com's documented link: centre is longitude first. */
 fun mapyUrl(mapset: String, l: Location?) = "https://mapy.com/fnc/v1/showmap?mapset=$mapset" +
@@ -198,7 +203,7 @@ fun MapPage(vm: LauncherVM, active: Boolean) {
                 }
                 override fun shouldOverrideUrlLoading(v: WebView, r: WebResourceRequest): Boolean {
                     val h = r.url.host ?: return false
-                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h.endsWith("windy.com") || h.endsWith("sarsen.org") || h == "appassets.androidplatform.net") return false
+                    if (h.endsWith("mapy.com") || h.endsWith("mapy.cz") || h.endsWith("seznam.cz") || h.endsWith("windy.com") || h.endsWith("sarsen.org") || h == "newbroman.github.io" || h == "appassets.androidplatform.net") return false
                     act.tryStart(Intent(Intent.ACTION_VIEW, r.url)); return true
                 }
             }

@@ -113,6 +113,7 @@ object NewboroughHub : Hub {
         "Report (PDF)" to SITE + "docs/report/report.pdf",
         "Public summary (PDF)" to SITE + "docs/public_summaries/Newborough_Warren_Public_Summary.pdf",
         "Crynodeb cyhoeddus (PDF)" to SITE + "docs/public_summaries/Niwbwrch_Crynodeb_Cyhoeddus.pdf",
+        "Warren Heights · 1 m heights and depth to water" to SITE + "warren_heights/",
         "LiDAR Lens · the Warren in 3D" to "https://lidarlens.sarsen.org/?ui=field#c=53.14740%2C-4.35994%2C15.25&l=53.14845%2C-4.35994&mode=10&az=66&el=35&ve=2&rad=10&ct=1.1&gm=1&op=1&ls=266&ramp=grey&auto=1&fs=1&sm=0&base=sat&ui=field",
         "Research site" to SITE,
         "GitHub repo" to "https://github.com/newbroman/Newborough_Hydrology",
