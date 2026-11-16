@@ -67,6 +67,12 @@ class MainActivity : ComponentActivity() {
         vm.assistantFallback = null
         val cmd = Assistant.interpret(text)
         // Anything Dune can't do itself goes to the AI, if one is set up.
+        // …except alarms and timers worded in a way Dune didn't catch: the AI can't set them, so say how to ask
+        if (cmd is Cmd.Unknown && Regex("\\b(alarm|timer|wake me)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+            val r = "I didn't catch the time in that. Try “set an alarm for 7 am”, “wake me up tomorrow at 6:30”, “alarm in 40 minutes”, " +
+                "“alarm every weekday at 7 called gym”, “cancel my 7 am alarm” or “what alarms do I have”."
+            vm.assistantReply = r; if (speak || voice) Speaker.speak(this, r); return
+        }
         if (cmd is Cmd.Unknown && Brain.ready(this)) { vm.askAi(text, speak, sayIt = voice); return }
         val reply = Assistant.run(this, vm, cmd)
         vm.assistantReply = reply ?: if (vm.assistantFallback != null)

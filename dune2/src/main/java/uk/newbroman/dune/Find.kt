@@ -108,7 +108,13 @@ object Find {
     /** A plain-English description of a recognised command, or null if [q] isn't one. */
     fun describe(cmd: Cmd): String? = when (cmd) {
         is Cmd.AddTask -> "Add task: ${cmd.text}"
-        is Cmd.Alarm -> "Set an alarm for %02d:%02d".format(cmd.hour, cmd.minute)
+        is Cmd.Alarm -> "Set an alarm " + when {
+            cmd.inMinutes != null -> "in ${cmd.inMinutes} min"
+            else -> "for %02d:%02d".format(cmd.hour, cmd.minute) + (if (cmd.days.isNotEmpty()) " " + Alarms.daysText(cmd.days) else "") +
+                when (cmd.on) { null -> ""; 0 -> " today"; 1 -> " tomorrow"; else -> " on " + java.time.DayOfWeek.of(cmd.on - 10).getDisplayName(java.time.format.TextStyle.FULL, java.util.Locale.UK) }
+        } + (cmd.label?.let { " – $it" } ?: "")
+        is Cmd.AlarmCancel -> "Cancel " + when { cmd.all -> "all alarms"; cmd.hour != null -> "the %02d:%02d alarm".format(cmd.hour, cmd.minute ?: 0); cmd.label != null -> "the ${cmd.label} alarm"; else -> "the next alarm" }
+        is Cmd.AlarmList -> "Show my alarms"
         is Cmd.Timer -> "Start a timer for " + (if (cmd.seconds >= 60) "${cmd.seconds / 60} min" else "${cmd.seconds} s")
         is Cmd.Navigate -> "Navigate to " + (cmd.dest ?: "home")
         is Cmd.Search -> "Search the web for “${cmd.q}”"

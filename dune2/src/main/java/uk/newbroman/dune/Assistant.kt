@@ -12,7 +12,11 @@ import java.time.LocalDateTime
 sealed class Cmd {
     data class Open(val app: String) : Cmd()
     data class AddTask(val text: String) : Cmd()
-    data class Alarm(val hour: Int, val minute: Int) : Cmd()
+    /** [days] repeat weekly (Calendar.MONDAY…); [on] a one-off day (0 today, 1 tomorrow, 10 + DayOfWeek); [inMinutes] from now. */
+    data class Alarm(val hour: Int, val minute: Int, val days: List<Int> = emptyList(), val on: Int? = null,
+                     val inMinutes: Int? = null, val label: String? = null) : Cmd()
+    data class AlarmCancel(val hour: Int? = null, val minute: Int? = null, val label: String? = null, val all: Boolean = false) : Cmd()
+    object AlarmList : Cmd()
     data class Timer(val seconds: Int) : Cmd()
     data class Navigate(val dest: String?) : Cmd()      // null = home
     data class Search(val q: String) : Cmd()
@@ -39,11 +43,19 @@ object Assistant {
         "forty" to 40, "forty-five" to 45, "sixty" to 60, "ninety" to 90,
     )
 
-    private fun num(s: String): Int? = s.toIntOrNull() ?: numberWords[s]
+    internal fun num(s: String): Int? = s.toIntOrNull() ?: numberWords[s]
 
     fun interpret(raw: String): Cmd {
         val t = raw.trim().trimEnd('.', '!', '?').replace(Regex("\\s+"), " ")
-        val s = t.lowercase().removePrefix("please ").removePrefix("hey dune ").removePrefix("dune ")
+        // How people ask: "can you…", "please…", "…for me please" – the command is what's left
+        var s = t.lowercase()
+        while (true) {
+            val before = s
+            s = s.replace(Regex("^(please|ok|okay|hey|hi|dune|ok computer|okay computer|computer|can you|could you|would you|will you|would you mind|i want you to|i'd like you to|i would like you to)[, ]+"), "")
+                .replace(Regex("[, ]+(please|for me|thanks|thank you|dune)$"), "")
+                .replace(Regex("^(i need|i want|i'd like|i would like|give me|get me) (an alarm|a timer|alarms?)\\b"), "set $2")
+            if (s == before) break
+        }
         fun after(re: String): String? = Regex(re).find(s)?.let { m -> t.substring(t.length - s.length).substring(m.range.last + 1).trim().ifEmpty { null } }
 
         // Drive mode
@@ -83,13 +95,7 @@ object Assistant {
         Regex("^navigate ").find(s)?.let { return Cmd.Navigate(after("^navigate ")!!) }
 
         // Alarm and timer
-        Regex("^(set |wake me )(an |the |my )?(alarm )?(for |at |up at )?(\\d{1,2})(?:[:. ](\\d{2}))? ?(am|pm|a\\.m\\.|p\\.m\\.)?$").find(s)?.let { m ->
-            var h = m.groupValues[5].toInt(); val min = m.groupValues[6].toIntOrNull() ?: 0
-            val ap = m.groupValues[7]
-            if (ap.startsWith("p") && h < 12) h += 12
-            if (ap.startsWith("a") && h == 12) h = 0
-            if (h in 0..23 && min in 0..59 && (s.contains("alarm") || s.startsWith("wake"))) return Cmd.Alarm(h, min)
-        }
+        (Alarms.parseOther(s) ?: Alarms.parse(s))?.let { return it }
         Regex("^(set )?(a |the )?timer (for )?(\\S+) (second|minute|hour|min)s?$|^(\\S+) (second|minute|hour|min)s? timer$").find(s)?.let { m ->
             val n = num(m.groupValues[4].ifEmpty { m.groupValues[6] }) ?: return@let
             val unit = m.groupValues[5].ifEmpty { m.groupValues[7] }
@@ -169,11 +175,9 @@ object Assistant {
                 }
             }
             is Cmd.AddTask -> { s.addTask(cmd.text); "Added task: ${cmd.text}" }
-            is Cmd.Alarm -> {
-                val ok = act.tryStart(Intent(AlarmClock.ACTION_SET_ALARM).putExtra(AlarmClock.EXTRA_HOUR, cmd.hour)
-                    .putExtra(AlarmClock.EXTRA_MINUTES, cmd.minute).putExtra(AlarmClock.EXTRA_SKIP_UI, true))
-                if (ok) "Alarm set for %02d:%02d".format(cmd.hour, cmd.minute) else "No alarm app found"
-            }
+            is Cmd.Alarm -> Alarms.set(act, cmd)
+            is Cmd.AlarmCancel -> Alarms.cancel(act, cmd)
+            is Cmd.AlarmList -> Alarms.list(act, vm.screen == Screen.DRIVE)
             is Cmd.Timer -> {
                 val ok = act.tryStart(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, cmd.seconds)
                     .putExtra(AlarmClock.EXTRA_SKIP_UI, true))
