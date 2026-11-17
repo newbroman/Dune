@@ -68,3 +68,17 @@ class AlarmsTest {
         assertEquals(null, Alarms.moment(Cmd.Alarm(7, 0), now))
     }
 }
+
+class AlarmWordingTest {
+    private fun c(s: String) = Assistant.interpret(s)
+    @Test fun howSpeechWritesTimes() {
+        for (s in listOf("Set an alarm for 7:00 a.m.", "set an alarm for 7.00 am", "Set an alarm for 7:00 AM.", "set an alarm for 7 a.m.",
+                         "Set an alarm for 7:00 a.m", "set an alarm for 7.00am", "set an alarm for seven", "set an alarm for 7 o'clock",
+                         "Set an alarm for 07:00.", "set an alarm for 7:00 in the morning"))
+            assertEquals(s, Cmd.Alarm(7, 0), c(s))
+        for (s in listOf("Set an alarm for 7:00 p.m.", "set an alarm for 7pm", "Set an alarm for 19:00", "set an alarm for 7 in the evening"))
+            assertEquals(s, Cmd.Alarm(19, 0), c(s))
+        assertEquals(Cmd.Alarm(6, 0, on = 1), c("Wake me up tomorrow at 6:00 a.m."))
+        assertEquals(Cmd.Alarm(7, 30, days = listOf(2, 3, 4, 5, 6)), c("Set an alarm for 7:30 a.m. every weekday."))
+    }
+}

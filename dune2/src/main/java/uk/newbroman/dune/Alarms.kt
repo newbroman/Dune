@@ -57,7 +57,7 @@ object Alarms {
 
     /** A spoken time: "7", "7:30", "6 15", "6 pm", "noon", "midnight", "half past 6", "quarter to 7". */
     fun time(t: String, evening: Boolean = false): Pair<Int, Int>? {
-        val s = t.trim()
+        val s = tidy(t.trim())
         when (s) { "noon", "midday" -> return 12 to 0; "midnight" -> return 0 to 0 }
         Regex("^(half past|quarter past|quarter to) (\\S+)( am| pm| a\\.m\\.| p\\.m\\.)?$").find(s)?.let { m ->
             var h = Assistant.num(m.groupValues[2]) ?: return null
@@ -90,7 +90,11 @@ object Alarms {
     }
 
     /** "set an alarm for 7 every weekday called gym", "wake me up tomorrow at 6", "alarm in 40 minutes", … */
-    fun parse(s: String): Cmd? {
+    /** Speech-to-text writes "a.m.", "a.m", "A.M.", "a. m." – and the sentence's full stop may take the last dot. */
+    fun tidy(s: String) = s.replace(Regex("\\b([ap])\\. ?m\\b\\.?"), "$1m").replace(Regex("(\\d)\\s*([ap]m)\\b"), "$1 $2")
+
+    fun parse(raw: String): Cmd? {
+        val s = tidy(raw)
         val lead = Regex("^(?:(?:set|make|create|add|put)(?: me)? (?:an |a |the |my |another )?(?:new )?alarm|alarm|wake me(?: up)?)(?: |$)").find(s) ?: return null
         var r = s.substring(lead.range.last + 1).trim()
         if (!s.contains("alarm") && !s.startsWith("wake me")) return null
@@ -98,7 +102,8 @@ object Alarms {
         var label: String? = null
         Regex("(?:^| )(?:called|named|labelled|labeled|saying|to say) (.+)$").find(r)?.let { label = it.groupValues[1]; r = r.substring(0, it.range.first).trim() }
         if (label == null) Regex("(?:^| )(?:to|for)(?: the)? (?!(?:\\d|$DAY|tomorrow|today|tonight|noon|midday|midnight|half|quarter|every|weekday|weekend|in )\\b)([a-z].+)$").find(r)?.let {
-            label = it.groupValues[1]; r = r.substring(0, it.range.first).trim()
+            // "for seven", "for 7 o'clock", "for tomorrow at 6" are times, not labels
+            if (parseWhen(it.groupValues[1]) == null) { label = it.groupValues[1]; r = r.substring(0, it.range.first).trim() }
         }
         // a time or day the speaker put after the label ("to take pills at 9") belongs to the alarm
         label?.let { l ->
@@ -217,7 +222,8 @@ object Alarms {
     // ---------- cancelling and listing ----------
 
     /** "cancel all alarms", "cancel my 7 am alarm", "cancel the bins alarm", "turn off my alarm", "what alarms do I have" */
-    fun parseOther(s: String): Cmd? {
+    fun parseOther(raw: String): Cmd? {
+        val s = tidy(raw)
         if (!s.contains("alarm")) return null
         if (Regex("^(?:what|which|list|show|read|tell me|any|do i have|have i got)\\b.*alarms?|^when(?:'s| is) my (?:next )?alarm|^(?:my|next) alarms?$|^what time is my alarm").containsMatchIn(s))
             return Cmd.AlarmList
