@@ -202,7 +202,15 @@ object Alarms {
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
         if (a.days.isNotEmpty()) i.putExtra(AlarmClock.EXTRA_DAYS, ArrayList(a.days))
         a.label?.let { i.putExtra(AlarmClock.EXTRA_MESSAGE, it) }
-        if (!act.tryStart(i)) return "No alarm app found"
+        val err = clockError(act, i)
+        if (err != null) {
+            // the Clock app wouldn't take it: a one-off Dune can ring itself; a weekly repeat it can't
+            if (a.days.isNotEmpty()) return "The Clock app refused the alarm ($err), and Dune can't hold repeating alarms itself"
+            val t = at ?: now.toLocalDate().atTime(h, m).let { if (it.isAfter(now)) it else it.plusDays(1) }
+            val ok = schedule(act, Own(System.currentTimeMillis(), t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), a.label))
+            return if (ok) "Alarm set for ${hm(t.hour, t.minute)} ${relDay(t)}$named. Dune will ring it itself – the Clock app refused ($err)."
+            else "Dune isn't allowed to set exact alarms – allow it in the screen that just opened, then ask again"
+        }
         val whenText = when {
             a.days.isNotEmpty() -> " " + daysText(a.days)
             a.inMinutes != null -> ", in " + spanText(a.inMinutes)
@@ -211,6 +219,17 @@ object Alarms {
             else -> ""
         }
         return "Alarm set for ${hm(h, m)}$whenText$named"
+    }
+
+    /** Hand [i] to the Clock app; null if it took it, otherwise why not (logged, for adb logcat -s Dune). */
+    fun clockError(ctx: Context, i: Intent): String? = try {
+        ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); null
+    } catch (e: android.content.ActivityNotFoundException) {
+        android.util.Log.w("Dune", "no app for ${i.action}", e); "no Clock app answers alarm requests"
+    } catch (e: SecurityException) {
+        android.util.Log.w("Dune", "Clock app refused ${i.action}", e); "permission refused"
+    } catch (e: Exception) {
+        android.util.Log.w("Dune", "Clock app failed ${i.action}", e); e.javaClass.simpleName
     }
 
     private fun spanText(min: Int) = when {

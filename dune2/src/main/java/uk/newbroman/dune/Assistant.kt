@@ -179,9 +179,8 @@ object Assistant {
             is Cmd.AlarmCancel -> Alarms.cancel(act, cmd)
             is Cmd.AlarmList -> Alarms.list(act, vm.screen == Screen.DRIVE)
             is Cmd.Timer -> {
-                val ok = act.tryStart(Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, cmd.seconds)
-                    .putExtra(AlarmClock.EXTRA_SKIP_UI, true))
-                if (!ok) return "No timer app found"
+                Alarms.clockError(act, Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, cmd.seconds)
+                    .putExtra(AlarmClock.EXTRA_SKIP_UI, true))?.let { return "The Clock app wouldn't start the timer ($it)" }
                 val m = cmd.seconds / 60
                 "Timer set for " + if (cmd.seconds < 60) "${cmd.seconds} seconds" else if (cmd.seconds % 3600 == 0) "${cmd.seconds / 3600} hour(s)" else "$m minute${if (m == 1) "" else "s"}"
             }
