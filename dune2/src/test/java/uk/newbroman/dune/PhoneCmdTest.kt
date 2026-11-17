@@ -72,7 +72,7 @@ class PhoneCmdTest {
         assertEquals(9.0, (c("square root of 81") as PhoneCmd.Sum).value, 1e-9)
         assertEquals(2.5, (c("what's 10 divided by 4") as PhoneCmd.Sum).value, 1e-9)
         assertEquals(17.0, (c("what's 5 plus 3 times 4") as PhoneCmd.Sum).value, 1e-9)
-        assertEquals(Cmd.Translate("hello"), c("what's hello in polish"))
+        assertEquals(Cmd.Translate("hello", "pl"), c("what's hello in polish"))
         assertNull(Calc.eval("the weather"))
     }
 

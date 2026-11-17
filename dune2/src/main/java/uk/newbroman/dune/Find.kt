@@ -119,7 +119,8 @@ object Find {
         is Cmd.Timer -> "Start a timer for " + (if (cmd.seconds >= 60) "${cmd.seconds / 60} min" else "${cmd.seconds} s")
         is Cmd.Navigate -> "Navigate to " + (cmd.dest ?: "home")
         is Cmd.Search -> "Search the web for “${cmd.q}”"
-        is Cmd.Translate -> "Translate “${cmd.text}” into Polish"
+        is Cmd.Translate -> if (cmd.text.isBlank()) (if (cmd.to == "en") "Translate from Polish (listen)" else "Translate into Polish (listen)")
+            else "Translate “${cmd.text}” into " + if ((cmd.to ?: Translation.guessTo(cmd.text)) == "pl") "Polish" else "English"
         is Cmd.Spotify -> if (cmd.q != null) "Play “${cmd.q}” on Spotify" else "Open Spotify"
         is Cmd.Dial -> "Call ${cmd.number}"
         is Cmd.CallPerson -> (if (cmd.video) "Video call " else if (cmd.whatsapp) "WhatsApp call " else "Call ") + cmd.name

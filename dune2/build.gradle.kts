@@ -14,8 +14,8 @@ android {
         applicationId = "uk.newbroman.dune2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 69
-        versionName = "2.65"
+        versionCode = 70
+        versionName = "2.66"
         // phones only: keeps the wake-word engine's native code from tripling the APK
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
@@ -80,6 +80,8 @@ dependencies {
     implementation("androidx.camera:camera-video:$camerax")
     // offline wake word ("OK Computer")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
+    // English ⇄ Polish translation on the phone (model downloaded once, then offline)
+    implementation("com.google.mlkit:translate:17.0.3")
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")

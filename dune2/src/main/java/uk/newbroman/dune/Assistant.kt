@@ -20,7 +20,8 @@ sealed class Cmd {
     data class Timer(val seconds: Int) : Cmd()
     data class Navigate(val dest: String?) : Cmd()      // null = home
     data class Search(val q: String) : Cmd()
-    data class Translate(val text: String) : Cmd()
+    /** [to] "pl" or "en", or null to tell from the text; an empty [text] means listen for it. */
+    data class Translate(val text: String, val to: String? = null) : Cmd()
     data class Spotify(val q: String?) : Cmd()
     data class Media(val action: String) : Cmd()        // play, pause, next, previous
     data class Reply(val text: String) : Cmd()
@@ -56,7 +57,7 @@ object Assistant {
                 .replace(Regex("^(i need|i want|i'd like|i would like|give me|get me) (an alarm|a timer|alarms?)\\b"), "set $2")
             if (s == before) break
         }
-        fun after(re: String): String? = Regex(re).find(s)?.let { m -> t.substring(t.length - s.length).substring(m.range.last + 1).trim().ifEmpty { null } }
+        fun after(re: String): String? = Regex(re).find(s)?.let { m -> cased(t, s).substring(m.range.last + 1).trim().ifEmpty { null } }
 
         // Drive mode
         if (Regex("^(exit|stop|end|leave|close) (drive|driving)( mode)?$").matches(s)) return Cmd.DriveMode(false)
@@ -73,14 +74,14 @@ object Assistant {
         // Messages
         if (Regex("^(read|what are) (out )?(my |the )?(new |latest )?messages?$").matches(s)) return Cmd.ReadMessages
         Regex("^(reply|answer|respond)( with| saying| say)? (.+)$").find(s)?.let {
-            return Cmd.Reply(t.substring(t.length - s.length).substring(it.groups[3]!!.range.first).trim())
+            return Cmd.Reply(cased(t, s).substring(it.groups[3]!!.range.first).trim())
         }
         // New messages: "send a message to Anna saying …", "text Tom …", "WhatsApp Mum …", "tell Jo …"
         Regex("^(?:send |write )?(?:a |an )?(whatsapp|text|sms|message)(?: message)?(?: to)? (?!call\\b)(.+)$|^(tell) (?!me\\b)(.+)$").find(s)?.let { m ->
             val word = m.groups[1]?.value ?: m.groups[3]!!.value
             val g = m.groups[2] ?: m.groups[4]!!
             val via = when (word) { "whatsapp" -> "whatsapp"; "text", "sms" -> "sms"; else -> null }
-            return Cmd.Send(t.substring(t.length - s.length).substring(g.range.first).trim(), via)
+            return Cmd.Send(cased(t, s).substring(g.range.first).trim(), via)
         }
 
         // Time / phrase
@@ -90,7 +91,7 @@ object Assistant {
         // Navigation
         if (Regex("^(navigate|directions|take me|drive|go|get me) (home|back home)$|^home$|^(go|going) home$").matches(s)) return Cmd.Navigate(null)
         Regex("^(navigate|directions|take me|drive|get me|route|go)( me)? (to|towards) ").find(s)?.let { m ->
-            return Cmd.Navigate(t.substring(t.length - s.length).substring(m.range.last + 1).trim())
+            return Cmd.Navigate(cased(t, s).substring(m.range.last + 1).trim())
         }
         Regex("^navigate ").find(s)?.let { return Cmd.Navigate(after("^navigate ")!!) }
 
@@ -109,16 +110,22 @@ object Assistant {
 
         // Tasks
         Regex("^(add (a )?task|new task|remind me to|add to (my )?tasks|task)[: ]+").find(s)?.let { m ->
-            return Cmd.AddTask(t.substring(t.length - s.length).substring(m.range.last + 1).trim().replaceFirstChar { it.uppercase() })
+            return Cmd.AddTask(cased(t, s).substring(m.range.last + 1).trim().replaceFirstChar { it.uppercase() })
         }
         Regex("^add (.+) to (my |the )?(tasks|task list|to-?do( list)?)$").find(s)?.let { m ->
-            return Cmd.AddTask(t.substring(t.length - s.length).substring(m.groups[1]!!.range.first, m.groups[1]!!.range.last + 1).replaceFirstChar { it.uppercase() })
+            return Cmd.AddTask(cased(t, s).substring(m.groups[1]!!.range.first, m.groups[1]!!.range.last + 1).replaceFirstChar { it.uppercase() })
         }
 
-        // Translation
-        Regex("^how (do|would) (you|i) say (.+?) in polish$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[3]!!.range)) }
-        Regex("^(translate|what is|what's) (.+?) (in|into|to) (polish|english)$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[2]!!.range)) }
+        // Translation, English ⇄ Polish, done on the phone and said aloud
+        if (Regex("^(?:translate )?(?:from )?polish (?:to|into) english$|^translate (?:from )?polish$|^(?:listen|translate) in polish$|^what does this mean$|^i'?ll say it in polish$").matches(s))
+            return Cmd.Translate("", "en")
+        if (Regex("^translate (?:to|into) polish$|^(?:translate )?(?:from )?english (?:to|into) polish$").matches(s)) return Cmd.Translate("", "pl")
+        Regex("^how (?:do|would|can) (?:you|i) say (.+?) in (polish|english)$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[1]!!.range), Translation.code(it.groupValues[2])) }
+        Regex("^(?:translate|what is|what's|whats|say) (.+?) (?:in|into|to) (polish|english)$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[1]!!.range), Translation.code(it.groupValues[2])) }
+        Regex("^(?:what is |what's )?(?:the )?(polish|english) (?:word )?for (.+)$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[2]!!.range), Translation.code(it.groupValues[1])) }
+        Regex("^what does (.+?) mean(?: in english)?$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[1]!!.range), "en") }
         Regex("^translate (.+)$").find(s)?.let { return Cmd.Translate(orig(t, s, it.groups[1]!!.range)) }
+        Regex("^(.+?) in (polish|english)$").find(s)?.let { if (it.groupValues[1].split(' ').size <= 12) return Cmd.Translate(orig(t, s, it.groups[1]!!.range), Translation.code(it.groupValues[2])) }
 
         // Music
         Regex("^play (.+?) on spotify$").find(s)?.let { return Cmd.Spotify(orig(t, s, it.groups[1]!!.range)) }
@@ -141,9 +148,14 @@ object Assistant {
     }
 
     /** Substring of the original text (keeps capitals) for a range found in the lower-cased text. */
+    /** [s] as the person wrote it (their capitals), found in [t] – it may have lost words at either end. */
+    internal fun cased(t: String, s: String): String {
+        val off = t.lowercase().indexOf(s)
+        return if (off >= 0) t.substring(off, off + s.length) else s
+    }
+
     private fun orig(t: String, s: String, r: IntRange): String {
-        val off = t.length - s.length
-        return t.substring(off + r.first, off + r.last + 1).trim()
+        return cased(t, s).substring(r.first, r.last + 1).trim()
     }
 
     /** Best app for a spoken name: exact, then starts-with, then contains. */
@@ -208,7 +220,7 @@ object Assistant {
                 Actions.navigate(act, dest); "Navigating to ${cmd.dest ?: "home"}"
             }
             is Cmd.Search -> { Actions.webSearch(act, cmd.q); "Searching for ${cmd.q}" }
-            is Cmd.Translate -> { Actions.translate(act, cmd.text); "Translating “${cmd.text}”" }
+            is Cmd.Translate -> Translation.run(act, vm, cmd)
             is Cmd.Spotify -> {
                 if (cmd.q == null) { act.launchPackage(SPOTIFY) || act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:"))); "Opening Spotify" }
                 else { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(cmd.q))), "Spotify isn't installed"); "Searching Spotify for ${cmd.q}" }
