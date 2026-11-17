@@ -72,14 +72,23 @@ object VoiceCheck {
                     { act -> act.tryStart(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + act.packageName))) }),
             ),
             "Getting about" to listOf(
-                Row("Location", granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION), "maps, Drive mode, weather where you are", perm(Manifest.permission.ACCESS_FINE_LOCATION)),
+                Row("Location", granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION), "maps, Drive mode, “what's the weather”, “where am I”", perm(Manifest.permission.ACCESS_FINE_LOCATION)),
                 Row("Google Maps", installed(ctx, MAPS), if (installed(ctx, MAPS)) "“navigate to…”, “take me home”" else "“navigate to…” falls back to any maps app", null),
                 Row("Bluetooth", Drive.hasBtPermission(ctx), "Drive mode starts when the car connects", perm(Manifest.permission.BLUETOOTH_CONNECT)),
+            ),
+            "Phone settings by voice" to listOf(
+                Row("Torch", ctx.packageManager.hasSystemFeature(PackageManager.FEATURE_CAMERA_FLASH), "“torch on”, “turn off the flashlight”", null),
+                Row("Do Not Disturb access", nm.isNotificationPolicyAccessGranted, "“silent mode”, “do not disturb on”",
+                    { act -> act.tryStart(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }),
+                Row("Modify system settings", Settings.System.canWrite(ctx), "“brighter”, “brightness to 50%”",
+                    { act -> act.tryStart(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:" + act.packageName))) }),
+                Row("Calendar", granted(ctx, Manifest.permission.READ_CALENDAR), "“what's on today”, “my next appointment”", perm(Manifest.permission.READ_CALENDAR)),
+                Row("Dune split screen (accessibility)", SplitService.enabled(), "“lock the phone”, “take a screenshot”",
+                    { act -> act.tryStart(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }),
             ),
             "Other apps it hands over to" to listOf(
                 Row("Spotify", installed(ctx, SPOTIFY), "“play … on Spotify”", null),
                 Row("Google Translate", installed(ctx, TRANSLATE), if (installed(ctx, TRANSLATE)) "“translate…”" else "“translate…” uses the website instead", null),
-                Row("Calendar", granted(ctx, Manifest.permission.READ_CALENDAR), "the AI can answer from your calendar", perm(Manifest.permission.READ_CALENDAR)),
             ),
         )
     }

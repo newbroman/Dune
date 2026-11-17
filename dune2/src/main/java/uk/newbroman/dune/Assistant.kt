@@ -104,6 +104,9 @@ object Assistant {
         }
         if (Regex("^(set )?(a |the )?timer (for )?half an hour$").matches(s)) return Cmd.Timer(1800)
 
+        // The phone itself: torch, volume, battery, weather, calendar, camera, sums, "open calculator"…
+        Phone.parse(s)?.let { return it }
+
         // Tasks
         Regex("^(add (a )?task|new task|remind me to|add to (my )?tasks|task)[: ]+").find(s)?.let { m ->
             return Cmd.AddTask(t.substring(t.length - s.length).substring(m.range.last + 1).trim().replaceFirstChar { it.uppercase() })
@@ -250,6 +253,7 @@ object Assistant {
                 Speaker.speak(act, p.pl, PolishTime.PL); Speaker.speak(act, p.en, flush = false)
                 "${p.pl} – ${p.en}"
             }
+            is PhoneCmd -> Phone.run(act, vm, cmd)
             is Cmd.Unknown -> { vm.assistantFallback = cmd.text; null }
         }
     }

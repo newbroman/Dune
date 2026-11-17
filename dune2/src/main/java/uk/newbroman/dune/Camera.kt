@@ -213,7 +213,7 @@ fun CameraScreen(vm: LauncherVM) {
     val prefs = remember { act.getSharedPreferences("dune", 0) }
     var mode by rememberSaveable { mutableStateOf(vm.cameraMode ?: if (vm.cameraVideo) VIDEO else PHOTO) }
     val video = mode == VIDEO; val pano = mode == PANO || mode == SPHERE; val lapseMode = mode == LAPSE
-    var back by rememberSaveable { mutableStateOf(true) }
+    var back by rememberSaveable { mutableStateOf(!vm.cameraFront.also { vm.cameraFront = false }) }
     var flash by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
     var timer by remember { mutableIntStateOf(prefs.getInt("camTimer", 0)) }
     var macro by rememberSaveable { mutableStateOf(false) }

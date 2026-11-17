@@ -115,6 +115,7 @@ object Find {
         } + (cmd.label?.let { " – $it" } ?: "")
         is Cmd.AlarmCancel -> "Cancel " + when { cmd.all -> "all alarms"; cmd.hour != null -> "the %02d:%02d alarm".format(cmd.hour, cmd.minute ?: 0); cmd.label != null -> "the ${cmd.label} alarm"; else -> "the next alarm" }
         is Cmd.AlarmList -> "Show my alarms"
+        is PhoneCmd -> cmd.label
         is Cmd.Timer -> "Start a timer for " + (if (cmd.seconds >= 60) "${cmd.seconds / 60} min" else "${cmd.seconds} s")
         is Cmd.Navigate -> "Navigate to " + (cmd.dest ?: "home")
         is Cmd.Search -> "Search the web for “${cmd.q}”"

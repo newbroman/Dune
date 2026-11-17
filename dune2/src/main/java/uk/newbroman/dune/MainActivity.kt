@@ -63,8 +63,12 @@ class MainActivity : ComponentActivity() {
 
     /** Run a typed or spoken request; in Drive mode the answer is spoken too. */
     /** [voice]: asked out loud on the home screen, so the answer is read out too. */
+    /** Whether the last question was spoken (or asked in Drive mode), so an answer that arrives later is read out too. */
+    var lastAskSpoken = false
+
     fun handleAsk(text: String, speak: Boolean = vm.screen == Screen.DRIVE, voice: Boolean = false) {
         vm.assistantFallback = null
+        lastAskSpoken = speak || voice
         val cmd = Assistant.interpret(text)
         // Anything Dune can't do itself goes to the AI, if one is set up.
         // …except alarms and timers worded in a way Dune didn't catch: the AI can't set them, so say how to ask

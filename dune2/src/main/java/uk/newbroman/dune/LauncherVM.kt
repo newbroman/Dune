@@ -175,6 +175,8 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var cameraVideo by mutableStateOf(false)
     /** Which mode Dune's camera opens in (photo, video, lapse, pano, 360); null = from cameraVideo. */
     var cameraMode by mutableStateOf<String?>(null)
+    /** Open Dune's camera on the front lens next time ("take a selfie"). */
+    var cameraFront = false
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
     /** Map files to add as layers (opened with Dune from another app). */
