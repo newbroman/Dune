@@ -156,6 +156,20 @@ object Assistant {
     }
 
     /** Carry out [cmd]. Returns a short line to show (and in Drive mode, to speak). */
+    /** Commands that read notifications (messages, replies, what's playing) need Dune's notification access. */
+    private fun needsNotifications(act: MainActivity): String? {
+        if (NotifService.instance != null) return null
+        Actions.notificationAccess(act)
+        return "Dune can't see your notifications yet – turn on “Dune notifications” in the screen that's opening, then ask again"
+    }
+
+    /** Commands that look people up need the contacts permission: ask for it, and carry on once it's given. */
+    private fun needsContacts(act: MainActivity, cmd: Cmd): String? {
+        if (Find.canReadContacts(act)) return null
+        act.requestPerm(android.Manifest.permission.READ_CONTACTS) { ok -> if (ok) act.runCmd(cmd) else act.toast("Dune can't look people up without contacts permission") }
+        return "Allow Dune to see your contacts and I'll carry on"
+    }
+
     fun run(act: MainActivity, vm: LauncherVM, cmd: Cmd): String? {
         val s = vm.store
         return when (cmd) {
@@ -196,9 +210,10 @@ object Assistant {
                 if (cmd.q == null) { act.launchPackage(SPOTIFY) || act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:"))); "Opening Spotify" }
                 else { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(cmd.q))), "Spotify isn't installed"); "Searching Spotify for ${cmd.q}" }
             }
-            is Cmd.Media -> { if (vm.media.control(cmd.action)) null else "Nothing is playing" }
-            is Cmd.ReadMessages -> { Drive.readMessages(act); null }
+            is Cmd.Media -> { needsNotifications(act)?.let { return it }; if (vm.media.control(cmd.action)) null else "Nothing is playing" }
+            is Cmd.ReadMessages -> { needsNotifications(act)?.let { return it }; Drive.readMessages(act); null }
             is Cmd.Reply -> {
+                needsNotifications(act)?.let { return it }
                 val n = NotifService.items.value.firstOrNull { it.isMessage && it.reply != null }
                     ?: return "There's no message to reply to"
                 vm.pendingReply = PendingReply(n, cmd.text)
@@ -206,6 +221,7 @@ object Assistant {
                 null
             }
             is Cmd.Send -> {
+                needsContacts(act, cmd)?.let { return it }
                 val (o, why) = Messaging.prepare(act, cmd.rest, cmd.via)
                 if (o == null) return why
                 if (vm.screen != Screen.DRIVE) vm.screen = Screen.DRIVE   // the confirm-and-send panel lives there
@@ -218,14 +234,15 @@ object Assistant {
                 null
             }
             is Cmd.CallPerson -> {
-                if (!Find.canReadContacts(act)) return "Dune needs to see your contacts first"
+                needsContacts(act, cmd)?.let { return it }
                 val c = Messaging.match(cmd.name, Messaging.contacts(act))?.contact ?: return "I couldn't find ${cmd.name} in your contacts"
                 val p = Person(c.name, c.number, c.id)
                 val what = if (cmd.video) "Video calling" else if (cmd.whatsapp) "WhatsApp calling" else "Calling"
                 act.window.decorView.postDelayed({ if (cmd.whatsapp) Find.whatsappCall(act, p, cmd.video) else Find.callNow(act, p) }, 1500)
                 "$what ${c.name}"
             }
-            is Cmd.Dial -> { act.tryStart(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + cmd.number))); "Calling ${cmd.number}" }
+            // rings straight away with the call permission (asked once); without it, the dialler opens with the number in
+            is Cmd.Dial -> { Find.callNow(act, Person(cmd.number, cmd.number)); "Calling ${cmd.number}" }
             is Cmd.DriveMode -> { Drive.set(act, cmd.on); if (cmd.on) vm.screen = Screen.DRIVE else vm.goHome(); null }
             Cmd.TimeInPolish -> { Speaker.speak(act, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL); PolishTime.spoken(LocalDateTime.now()) }
             Cmd.PhraseOfDay -> {

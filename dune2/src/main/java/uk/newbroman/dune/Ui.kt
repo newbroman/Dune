@@ -846,6 +846,12 @@ fun SettingsScreen(vm: LauncherVM) {
         item { CarPicker(vm) }
         item { LinkRow("Start Drive mode now") { Drive.set(act, true); vm.screen = Screen.DRIVE } }
 
+        section("Voice commands check")
+        item {
+            Note("Whether each thing you might ask Dune has what it needs on this phone – permissions, special access, the apps it hands over to.")
+            VoiceCheck.Panel(vm)
+        }
+
         section("Learn")
         item {
             Toggle("Read a new card aloud when you open Learn", s.learnSpeakOnOpen)

@@ -72,6 +72,7 @@ val SETTINGS_INDEX: List<Pair<String, String>> = listOf(
     "Bluetooth" to "Drive mode",
     "head unit" to "Drive mode",
     "Start Drive mode now" to "Drive mode",
+    "Voice commands check" to "Voice commands check",
     "Learn" to "Learn",
     "Read a new card aloud when you open Learn" to "Learn",
     "Camera" to "Camera",

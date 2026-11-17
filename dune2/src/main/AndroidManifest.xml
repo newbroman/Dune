@@ -82,6 +82,10 @@
         <intent>
             <action android:name="android.media.action.STILL_IMAGE_CAMERA" />
         </intent>
+        <!-- the voice commands check asks whether a Clock app answers alarm requests -->
+        <intent>
+            <action android:name="android.intent.action.SET_ALARM" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.DIAL" />
         </intent>
