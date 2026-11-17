@@ -105,6 +105,9 @@ object Assistant {
         }
         if (Regex("^(set )?(a |the )?timer (for )?half an hour$").matches(s)) return Cmd.Timer(1800)
 
+        // Music and radio: recent plays, BBC Sounds stations and shows, Music of the Spheres
+        Listen.parse(s)?.let { return it }
+
         // The phone itself: torch, volume, battery, weather, calendar, camera, sums, "open calculator"…
         Phone.parse(s)?.let { return it }
 
@@ -189,6 +192,9 @@ object Assistant {
         val s = vm.store
         return when (cmd) {
             is Cmd.Open -> {
+                val show = cmd.app.removePrefix("the ").trim()
+                if (s.soundsFavourites.value.lines().any { it.trim().removePrefix("The ").equals(show.removePrefix("the "), true) || it.trim().equals(show, true) })
+                    return Listen.run(act, vm, ListenCmd.Show(show))
                 val a = findApp(vm.apps, cmd.app)
                 when {
                     a != null -> { vm.launch(a); "Opening ${a.label}" }
@@ -266,6 +272,7 @@ object Assistant {
                 "${p.pl} – ${p.en}"
             }
             is PhoneCmd -> Phone.run(act, vm, cmd)
+            is ListenCmd -> Listen.run(act, vm, cmd)
             is Cmd.Unknown -> { vm.assistantFallback = cmd.text; null }
         }
     }

@@ -58,6 +58,7 @@ val SETTINGS_INDEX: List<Pair<String, String>> = listOf(
     "portfolio" to "Coinbase",
     "Drive mode" to "Drive mode",
     "Home address (for “navigate home”)" to "Drive mode",
+    "BBC Sounds favourite shows, one per line (“play Unclassified”, “my Sounds favourites”)" to "Drive mode",
     "Start automatically in the car" to "Drive mode",
     "Read new messages aloud" to "Drive mode",
     "Landscape Drive screen" to "Drive mode",

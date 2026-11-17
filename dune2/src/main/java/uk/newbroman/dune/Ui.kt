@@ -298,6 +298,7 @@ internal fun AssistantBlock(vm: LauncherVM) {
             }
         }
     }
+    Listen.PickPanel(vm)
     if (!Brain.ready(act)) vm.assistantFallback?.let { f ->
         FlowRow(Modifier.padding(top = 6.dp)) {
             Chip("✦ Set up AI") { vm.assistantFallback = null; vm.assistantReply = null; vm.screen = Screen.SETTINGS
@@ -832,6 +833,7 @@ fun SettingsScreen(vm: LauncherVM) {
             Note("Drive mode opens when your phone connects to a car below, and closes when it disconnects. " +
                 "It reads new messages aloud and lets you reply by voice.")
             Field("Home address (for “navigate home”)", s.homeAddress)
+            Field("BBC Sounds favourite shows, one per line (“play Unclassified”, “my Sounds favourites”)", s.soundsFavourites, multi = true)
         }
         item { Toggle("Start automatically in the car", s.driveAuto) }
         item { Toggle("Read new messages aloud", s.driveReadAloud) }

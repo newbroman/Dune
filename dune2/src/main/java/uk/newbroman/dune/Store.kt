@@ -116,6 +116,8 @@ class Store private constructor(ctx: Context) {
     val driveReadAloud = Flag("driveReadAloud", true)
     val driveLandscape = Flag("driveLandscape", true)
     val homeAddress = Str("homeAddress", "")
+    /** BBC Sounds shows for "my Sounds favourites" and "play …", one per line. */
+    val soundsFavourites = Str("soundsFavourites", "Unclassified\nNew Music Show")
     var carDevices by mutableStateOf(readList("carDevices").toSet())
         private set
     fun setCar(address: String, on: Boolean) {

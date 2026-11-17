@@ -46,7 +46,7 @@ class PolishAssistantTest {
         assertEquals(Cmd.Spotify("Pink Floyd"), c("play Pink Floyd on Spotify"))
         assertEquals(Cmd.Spotify(null), c("Spotify"))
         assertEquals(Cmd.Open("bbc sounds"), c("play BBC Sounds"))
-        assertEquals(Cmd.Open("spheres"), c("open spheres"))
+        assertEquals(ListenCmd.Spheres(null, false), c("open spheres"))
         assertEquals(Cmd.Media("pause"), c("pause"))
         assertEquals(Cmd.Media("next"), c("skip"))
         assertEquals(Cmd.ReadMessages, c("read my messages"))
