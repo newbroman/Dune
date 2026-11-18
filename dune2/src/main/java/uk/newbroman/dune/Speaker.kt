@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import java.util.Locale
 
 /** One shared text-to-speech engine. Speech ducks music rather than stopping it. */
@@ -12,6 +16,9 @@ object Speaker {
     private var ready = false
     private var warnedPolish = false
     private val pending = ArrayList<Pair<String, Locale>>()
+    /** True while Dune is reading something out (the Stop button shows). */
+    var talking by mutableStateOf(false)
+        private set
 
     fun speak(ctx: Context, text: String, locale: Locale = Locale.UK, flush: Boolean = true) {
         val app = ctx.applicationContext
@@ -29,6 +36,12 @@ object Speaker {
                         .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
                 )
+                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(id: String?) { talking = true }
+                    override fun onDone(id: String?) { if (tts?.isSpeaking != true) talking = false }
+                    @Deprecated("old API") override fun onError(id: String?) { talking = false }
+                    override fun onStop(id: String?, interrupted: Boolean) { talking = false }
+                })
                 val q = pending.toList(); pending.clear()
                 q.forEachIndexed { i, (s, l) -> say(app, s, l, i == 0) }
             }
@@ -56,5 +69,5 @@ object Speaker {
         t.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, "dune" + System.nanoTime())
     }
 
-    fun stop() { tts?.stop() }
+    fun stop() { tts?.stop(); pending.clear(); talking = false }
 }

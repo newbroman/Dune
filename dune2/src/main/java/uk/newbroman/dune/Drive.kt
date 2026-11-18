@@ -348,7 +348,8 @@ fun DriveScreen(vm: LauncherVM) {
                     Spacer(Modifier.weight(1f))
                     vm.assistantReply?.let { Text(it, color = Dim, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(vertical = 4.dp)) }
-                    SpeakButton(act, Modifier.fillMaxWidth().height(76.dp))
+                    if (vm.aiBusy || Speaker.talking) StopButton(vm, Modifier.fillMaxWidth().height(76.dp))
+                    else SpeakButton(act, Modifier.fillMaxWidth().height(76.dp))
                 }
                 Box(Modifier.weight(0.58f).fillMaxHeight()) {
                     if (showMessages) MessagesPanel(vm, messages) { showMessages = false }
@@ -366,7 +367,8 @@ fun DriveScreen(vm: LauncherVM) {
                     else TileGrid(tiles, columns = 2, fill = false)
                 }
                 vm.assistantReply?.let { Text(it, color = Dim, fontSize = 15.sp, modifier = Modifier.padding(vertical = 6.dp)) }
-                SpeakButton(act, Modifier.fillMaxWidth().height(80.dp))
+                if (vm.aiBusy || Speaker.talking) StopButton(vm, Modifier.fillMaxWidth().height(80.dp))
+                else SpeakButton(act, Modifier.fillMaxWidth().height(80.dp))
             }
         }
     }
@@ -422,6 +424,18 @@ private fun SpeakButton(act: MainActivity, modifier: Modifier) {
         }) {
         Box(contentAlignment = Alignment.Center) {
             FitText("🎤  Speak", Bg, 26.sp, FontWeight.Medium)
+        }
+    }
+}
+
+/** In place of Speak while Dune is thinking or talking: one tap stops it. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun StopButton(vm: LauncherVM, modifier: Modifier) {
+    Surface(shape = RoundedCornerShape(40.dp), color = androidx.compose.ui.graphics.Color(0xFFB5543C), modifier = modifier
+        .combinedClickable { vm.stopAnswer() }) {
+        Box(contentAlignment = Alignment.Center) {
+            FitText("■  Stop", Fg, 26.sp, FontWeight.Medium)
         }
     }
 }

@@ -153,16 +153,31 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var aiBusy by mutableStateOf(false)
     /** Web pages the last answer came from (title, link). */
     var assistantSources by mutableStateOf<List<Pair<String, String>>>(emptyList())
+    private var aiJob: kotlinx.coroutines.Job? = null
+
     fun askAi(question: String, speak: Boolean = false, sayIt: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
-        if (aiBusy) { onAnswer("Still thinking about the last question…"); return }
+        if (aiBusy) { onAnswer("Still thinking about the last question… (tap Stop to drop it)"); return }
         aiBusy = true; assistantSources = emptyList(); onAnswer(if (Brain.webOn(ctx)) "Thinking (and searching if it needs to)…" else "Thinking…")
-        viewModelScope.launch {
-            val full = try { Brain.askFull(ctx, store, question, spoken = speak) } catch (e: Exception) { Brain.Answer("AI: " + (e.message ?: "something went wrong")) }
+        aiJob = viewModelScope.launch {
+            val full = try { Brain.askFull(ctx, store, question, spoken = speak) }
+                catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { Brain.Answer("AI: " + (e.message ?: "something went wrong")) }
             val a = full.text
             assistantSources = full.sources
             aiBusy = false; onAnswer(a)
             if (speak || sayIt) Speaker.speak(ctx, a)
         }
+    }
+    /**
+     * The Stop button: drop an answer still being worked out, and stop reading one out. A spoken answer
+     * that was wrong stays on screen (marked stopped) so you can see what it said.
+     */
+    fun stopAnswer() {
+        val wasThinking = aiBusy
+        aiJob?.cancel(); aiJob = null; aiBusy = false
+        Speaker.stop()
+        pick = null
+        assistantReply = if (wasThinking) "Stopped." else assistantReply?.let { if (it.endsWith("(stopped)")) it else "$it  (stopped)" }
     }
     var inboxAnswer by mutableStateOf<String?>(null)
     /** Dune 2: ask the hub pager to show a hub by id. */

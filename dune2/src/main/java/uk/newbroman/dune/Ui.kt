@@ -286,6 +286,9 @@ internal fun AssistantBlock(vm: LauncherVM) {
             }.padding(horizontal = 16.dp, vertical = 10.dp)
         )
     }
+    if (vm.aiBusy || Speaker.talking) Row(Modifier.padding(top = 6.dp)) {
+        Chip("■ Stop") { vm.stopAnswer() }
+    }
     vm.assistantReply?.let {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
             .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList() })
