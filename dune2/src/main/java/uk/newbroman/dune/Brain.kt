@@ -150,13 +150,26 @@ object Brain {
     fun shareMessages(ctx: Context) = prefs(ctx).getBoolean("aiMessages", true)
     fun shareCalendar(ctx: Context) = prefs(ctx).getBoolean("aiCalendar", true)
     fun shareTasks(ctx: Context) = prefs(ctx).getBoolean("aiTasks", true)
+    fun shareLocation(ctx: Context) = prefs(ctx).getBoolean("aiLocation", true)
+
+    /** Where you are, for the AI: town and postcode from the phone's GPS / network fix (never the internet address). */
+    suspend fun locationLine(ctx: Context): String? {
+        if (!shareLocation(ctx)) return null
+        val l = Geo.fix(ctx, maxAgeMs = 10 * 60_000L, timeoutMs = 15_000L) ?: return "LOCATION: unknown – the phone has no position fix. Say so; don't guess."
+        val name = Geo.placeName(ctx, l.latitude, l.longitude)
+        val ago = (System.currentTimeMillis() - l.time) / 60_000
+        return "LOCATION (from the phone's ${l.provider ?: "location"} fix, ±${l.accuracy.toInt()} m, ${if (ago < 1) "just now" else "$ago min ago"}): " +
+            (name?.takeIf { it.isNotBlank() }?.let { "$it – " } ?: "") + String.format(Locale.UK, "%.5f, %.5f", l.latitude, l.longitude) +
+            ". Use this for anything about where he is, nearby places, local weather or travel; never infer location from IP addresses."
+    }
     fun setShare(ctx: Context, what: String, on: Boolean) = prefs(ctx).edit().putBoolean(what, on).apply()
 
     private val fmt get() = SimpleDateFormat("EEE d MMM HH:mm", Locale.UK)
 
     /** The background the AI is given: today's date, your tasks, recent messages, your calendar. */
-    fun context(ctx: Context, store: Store): String = buildString {
+    fun context(ctx: Context, store: Store, location: String? = null): String = buildString {
         appendLine("Now: " + fmt.format(Date()) + " (phone's local time, " + java.util.TimeZone.getDefault().id + ").")
+        location?.let { appendLine(it) }
         if (shareTasks(ctx)) {
             val open = store.tasks.filter { !it.done }
             appendLine("\nTASKS (open): " + if (open.isEmpty()) "none" else "")
@@ -255,7 +268,7 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         val sys = SYSTEM + (if (spoken) "\nHe is driving: answer in one or two short spoken sentences." else "") +
             (if (web) "\nYou can search the web. Do so when the question needs current or outside facts (news, prices, opening times, " +
                 "tides, sports, travel, anything after your training); otherwise answer directly. Mention where facts came from in a few words." else "") +
-            "\n\nBACKGROUND\n" + context(ctx, store)
+            "\n\nBACKGROUND\n" + context(ctx, store, locationLine(ctx))
         if (web) runCatching { return@withContext askWeb(p, key, model, sys, question, spoken) }
             .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e
                 val plain = askPlain(p, key, model, sys, question, spoken)

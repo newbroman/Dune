@@ -113,6 +113,30 @@ object Geo {
         ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    /**
+     * A name for a position: "Menai Bridge, Isle of Anglesey, LL59 5EU". Android's own lookup first; it
+     * needs Google's services, so on phones without them it falls to postcodes.io (UK), then OpenStreetMap.
+     */
+    suspend fun placeName(ctx: Context, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+        if (Geocoder.isPresent()) runCatching {
+            @Suppress("DEPRECATION") Geocoder(ctx, Locale.UK).getFromLocation(lat, lon, 1)?.firstOrNull()?.let { a ->
+                listOfNotNull(a.thoroughfare?.let { t -> (a.subThoroughfare?.let { "$it " } ?: "") + t }, a.locality ?: a.subLocality,
+                    a.subAdminArea, a.postalCode).distinct().joinToString(", ").takeIf { it.isNotBlank() }
+            }
+        }.getOrNull()?.let { return@withContext it }
+        runCatching {
+            val r = JSONObject(get(String.format(Locale.US, "https://api.postcodes.io/postcodes?lon=%.6f&lat=%.6f&limit=1&radius=2000", lon, lat)))
+                .optJSONArray("result")?.optJSONObject(0)
+            r?.let { listOfNotNull(it.optString("parish").takeIf { p -> p.isNotBlank() && p != "null" && !p.contains("unparished") },
+                it.optString("admin_ward").takeIf { w -> w.isNotBlank() && w != "null" }, it.optString("admin_district").takeIf { d -> d.isNotBlank() && d != "null" },
+                it.optString("postcode")).distinct().joinToString(", ") }
+        }.getOrNull()?.takeIf { it.isNotBlank() }?.let { return@withContext it }
+        runCatching {
+            JSONObject(get(String.format(Locale.US, "https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=16&lat=%.6f&lon=%.6f", lat, lon)))
+                .optString("display_name").split(", ").take(4).joinToString(", ")
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
     /** The newest position the phone already holds, from any source (none is asked to look). */
     @SuppressLint("MissingPermission")
     fun lastKnown(ctx: Context): Location? {
@@ -172,13 +196,8 @@ object Geo {
     suspend fun current(ctx: Context): Place? {
         // for weather, a position up to an hour old is close enough
         val loc = fix(ctx, maxAgeMs = 3600_000L, timeoutMs = 20_000L) ?: return null
-        val name = withContext(Dispatchers.IO) {
-            try {
-                @Suppress("DEPRECATION")
-                Geocoder(ctx, Locale.UK).getFromLocation(loc.latitude, loc.longitude, 1)
-                    ?.firstOrNull()?.let { it.locality ?: it.subAdminArea }
-            } catch (e: Exception) { null }
-        }
+        val name = placeName(ctx, loc.latitude, loc.longitude)?.split(", ")?.let { parts ->
+            parts.firstOrNull { p -> p.isNotBlank() && !p.first().isDigit() && !Regex("^[A-Z]{1,2}\\d").containsMatchIn(p) } }
         return Place(loc.latitude, loc.longitude, name ?: "")
     }
 }

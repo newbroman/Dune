@@ -153,7 +153,9 @@ object Phone {
         }
 
         // where am I, lock, screenshot, coin, dice
-        if (Regex("^where am i(?: now| right now)?$|^what'?s my (?:location|address)$|^where are we$").matches(s)) return PhoneCmd.WhereAmI
+        if (Regex("^where am i(?: now| right now| at| currently)?$|^where are we(?: now)?$|^what'?s my (?:current )?(?:location|address|position|postcode|grid reference)$|" +
+                "^what is my (?:current )?(?:location|address|position|postcode)$|^(?:my |current )(?:location|position)$|^what (?:town|village|city|place|area|street|road|county|postcode) (?:am i|are we) (?:in|on|at)(?: now)?$|" +
+                "^where is this(?: place)?$|^what'?s this place(?: called)?$|^find my location$|^locate me$|^show (?:me )?where i am$").matches(s)) return PhoneCmd.WhereAmI
         if (Regex("^(?:lock|lock (?:the |my )?(?:phone|screen)|screen off|turn (?:the )?screen off)$").matches(s)) return PhoneCmd.ScreenAct("lock")
         if (Regex("^(?:take a |grab a )?screen ?shot$|^screenshot (?:this|the screen)$|^capture (?:the )?screen$").matches(s)) return PhoneCmd.ScreenAct("shot")
         if (Regex("^(?:flip|toss) a coin$|^heads or tails$").matches(s)) return PhoneCmd.Chance("coin")
@@ -420,11 +422,8 @@ object Phone {
         val loc = Geo.fix(ctx, maxAgeMs = 60_000L, timeoutMs = 30_000L)
             ?: return if (!(ctx.getSystemService(LocationManager::class.java)?.isLocationEnabled ?: true)) "Location is switched off on the phone"
                 else "I couldn't get a fix – try again outside or near a window"
-        val addr = withContext(Dispatchers.IO) {
-            runCatching { @Suppress("DEPRECATION") Geocoder(ctx, Locale.UK).getFromLocation(loc.latitude, loc.longitude, 1)?.firstOrNull() }.getOrNull()
-        }
         val ago = (System.currentTimeMillis() - loc.time) / 60_000
-        val line = addr?.let { a -> listOfNotNull(a.thoroughfare?.let { t -> (a.subThoroughfare?.let { "$it " } ?: "") + t }, a.locality ?: a.subAdminArea, a.postalCode).joinToString(", ") }
+        val line = Geo.placeName(ctx, loc.latitude, loc.longitude)
         return (line?.takeIf { it.isNotBlank() } ?: String.format(Locale.UK, "%.5f, %.5f", loc.latitude, loc.longitude)) +
             (if (ago > 10) " (as of $ago min ago)" else "") + String.format(Locale.UK, " · ±%d m", loc.accuracy.roundToInt())
     }

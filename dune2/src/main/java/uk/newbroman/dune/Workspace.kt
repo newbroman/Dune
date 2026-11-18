@@ -228,6 +228,7 @@ fun AiSettings(vm: LauncherVM) {
     ShareToggle("Let it read my messages and emails", "aiMessages", Brain.shareMessages(act))
     ShareToggle("Let it read my tasks", "aiTasks", Brain.shareTasks(act))
     ShareToggle("Let it read my calendar", "aiCalendar", Brain.shareCalendar(act))
+    ShareToggle("Tell it where I am (GPS / network fix)", "aiLocation", Brain.shareLocation(act))
     val cal = remember(tick) { Brain.calendar(act) != null }
     if (!cal) LinkRow("Allow calendar access") { act.requestPerm(Manifest.permission.READ_CALENDAR) { tick++ } }
     val contacts = remember(tick) { Find.canReadContacts(act) }

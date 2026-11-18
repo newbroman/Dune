@@ -50,6 +50,8 @@ class PhoneCmdTest {
         assertEquals(PhoneCmd.Agenda(1), c("what have I got tomorrow"))
         assertEquals(PhoneCmd.Agenda(null, next = true), c("when's my next appointment"))
         assertEquals(PhoneCmd.WhereAmI, c("where am I"))
+        for (q in listOf("What's my location?", "what town am I in", "where are we now", "what's my postcode", "my location", "where is this place", "locate me"))
+            assertEquals(q, PhoneCmd.WhereAmI, c(q))
     }
 
     @Test fun cameraAndApps() {
