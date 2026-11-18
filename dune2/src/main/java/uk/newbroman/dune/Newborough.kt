@@ -148,13 +148,8 @@ object NewboroughHub : Hub {
         // Where you are (last known fix – no GPS kept running), for the nearest well.
         LaunchedEffect(active, vm.resumeTick) {
             if (!active) return@LaunchedEffect
-            here = withContext(Dispatchers.IO) {
-                val ok = act.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                    act.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                if (!ok) null else act.getSystemService(LocationManager::class.java)?.let { lm ->
-                    lm.getProviders(true).mapNotNull { p -> runCatching { lm.getLastKnownLocation(p) }.getOrNull() }.maxByOrNull { it.time }
-                }
-            }
+            here = Geo.lastKnown(act)                       // straight away, then a fresh fix if that's old
+            Geo.fix(act, maxAgeMs = 5 * 60_000L)?.let { here = it }
             // What's in the logger inside Dune (its own readings store).
             // (only if the logger has been opened – no loading it in the background just to count)
             act.wellsIfOpen()?.eval("(function(){try{var r=JSON.parse(localStorage.getItem('nw_readings')||'[]');" +

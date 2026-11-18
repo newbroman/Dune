@@ -214,6 +214,8 @@ fun CameraScreen(vm: LauncherVM) {
     var mode by rememberSaveable { mutableStateOf(vm.cameraMode ?: if (vm.cameraVideo) VIDEO else PHOTO) }
     val video = mode == VIDEO; val pano = mode == PANO || mode == SPHERE; val lapseMode = mode == LAPSE
     var back by rememberSaveable { mutableStateOf(!vm.cameraFront.also { vm.cameraFront = false }) }
+    // get a fresh position while you frame the shot, so the photo's location tag isn't hours old (or missing)
+    LaunchedEffect(Unit) { Geo.fix(act, maxAgeMs = 60_000L) }
     var flash by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
     var timer by remember { mutableIntStateOf(prefs.getInt("camTimer", 0)) }
     var macro by rememberSaveable { mutableStateOf(false) }

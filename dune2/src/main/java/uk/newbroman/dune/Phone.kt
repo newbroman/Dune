@@ -417,9 +417,9 @@ object Phone {
 
     @SuppressLint("MissingPermission")
     private suspend fun whereAmI(ctx: Context): String {
-        val lm = ctx.getSystemService(LocationManager::class.java)
-        val loc = lm.allProviders.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
-            ?: return "I couldn't get your location"
+        val loc = Geo.fix(ctx, maxAgeMs = 60_000L, timeoutMs = 30_000L)
+            ?: return if (!(ctx.getSystemService(LocationManager::class.java)?.isLocationEnabled ?: true)) "Location is switched off on the phone"
+                else "I couldn't get a fix – try again outside or near a window"
         val addr = withContext(Dispatchers.IO) {
             runCatching { @Suppress("DEPRECATION") Geocoder(ctx, Locale.UK).getFromLocation(loc.latitude, loc.longitude, 1)?.firstOrNull() }.getOrNull()
         }

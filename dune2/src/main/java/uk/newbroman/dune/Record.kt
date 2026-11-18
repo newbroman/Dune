@@ -124,9 +124,7 @@ object Captures {
     fun where(ctx: Context): android.location.Location? {
         if (ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return null
-        val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
-        return listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused")
-            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+        return Geo.lastKnown(ctx)
     }
 }
 

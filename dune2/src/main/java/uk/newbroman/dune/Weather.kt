@@ -110,27 +110,68 @@ object Geo {
     }
 
     fun hasPermission(ctx: Context) =
-        ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+    /** The newest position the phone already holds, from any source (none is asked to look). */
+    @SuppressLint("MissingPermission")
+    fun lastKnown(ctx: Context): Location? {
+        if (!hasPermission(ctx)) return null
+        val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
+        return (lm.allProviders + "fused").distinct()
+            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+    }
+
+    /**
+     * Where the phone is now. Uses what it already holds if that's newer than [maxAgeMs]; otherwise asks
+     * every source that's switched on – Google's combined one, GPS, the mobile network – for a fresh fix
+     * and takes the first to answer, giving up after [timeoutMs] and falling back to the old position.
+     * (Phones without Google's location service, and any phone just after a restart, often hold nothing
+     * at all, so only reading the stored position finds nothing even with permission granted.)
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun fix(ctx: Context, maxAgeMs: Long = 2 * 60_000L, timeoutMs: Long = 25_000L): Location? {
+        if (!hasPermission(ctx)) return null
+        val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
+        val old = lastKnown(ctx)
+        if (old != null && System.currentTimeMillis() - old.time < maxAgeMs) return old
+        val fine = ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val sources = buildList {
+            if (Build.VERSION.SDK_INT >= 31 && lm.hasProvider(LocationManager.FUSED_PROVIDER)) add(LocationManager.FUSED_PROVIDER)
+            if (fine) add(LocationManager.GPS_PROVIDER)
+            add(LocationManager.NETWORK_PROVIDER)
+        }.filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+        if (sources.isEmpty()) return old
+        val fresh = withTimeoutOrNull(timeoutMs) {
+            suspendCancellableCoroutine<Location?> { cont ->
+                val listeners = ArrayList<android.location.LocationListener>()
+                var left = sources.size
+                fun done(l: Location?) {
+                    if (!cont.isActive) return
+                    if (l != null) { listeners.forEach { runCatching { lm.removeUpdates(it) } }; cont.resume(l) }
+                    else if (--left == 0) cont.resume(null)
+                }
+                sources.forEach { p ->
+                    runCatching {
+                        if (Build.VERSION.SDK_INT >= 30) lm.getCurrentLocation(p, null, ctx.mainExecutor) { done(it) }
+                        else {
+                            val li = android.location.LocationListener { l -> done(l) }
+                            listeners += li
+                            @Suppress("DEPRECATION") lm.requestSingleUpdate(p, li, android.os.Looper.getMainLooper())
+                        }
+                    }.onFailure { done(null) }
+                }
+                cont.invokeOnCancellation { listeners.forEach { runCatching { lm.removeUpdates(it) } } }
+            }
+        }
+        return fresh ?: old
+    }
 
     /** Phone's approximate location, or null if no permission / no fix. */
     @SuppressLint("MissingPermission")
     suspend fun current(ctx: Context): Place? {
-        if (!hasPermission(ctx)) return null
-        val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
-        var loc: Location? = lm.allProviders
-            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
-            .maxByOrNull { it.time }
-        if ((loc == null || System.currentTimeMillis() - loc.time > 6 * 3600_000L) &&
-            Build.VERSION.SDK_INT >= 30 && lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
-        ) {
-            val fresh = withTimeoutOrNull(10_000) {
-                suspendCancellableCoroutine<Location?> { cont ->
-                    lm.getCurrentLocation(LocationManager.NETWORK_PROVIDER, null, ctx.mainExecutor) { cont.resume(it) }
-                }
-            }
-            if (fresh != null) loc = fresh
-        }
-        loc ?: return null
+        // for weather, a position up to an hour old is close enough
+        val loc = fix(ctx, maxAgeMs = 3600_000L, timeoutMs = 20_000L) ?: return null
         val name = withContext(Dispatchers.IO) {
             try {
                 @Suppress("DEPRECATION")

@@ -72,6 +72,8 @@ object VoiceCheck {
                     { act -> act.tryStart(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + act.packageName))) }),
             ),
             "Getting about" to listOf(
+                Row("Location switched on", ctx.getSystemService(android.location.LocationManager::class.java)?.isLocationEnabled == true,
+                    "the phone's own Location switch (quick settings)", { act -> act.tryStart(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) }),
                 Row("Location", granted(ctx, Manifest.permission.ACCESS_FINE_LOCATION), "maps, Drive mode, “what's the weather”, “where am I”", perm(Manifest.permission.ACCESS_FINE_LOCATION)),
                 Row("Google Maps", installed(ctx, MAPS), if (installed(ctx, MAPS)) "“navigate to…”, “take me home”" else "“navigate to…” falls back to any maps app", null),
                 Row("Bluetooth", Drive.hasBtPermission(ctx), "Drive mode starts when the car connects", perm(Manifest.permission.BLUETOOTH_CONNECT)),
