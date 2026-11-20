@@ -24,6 +24,8 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -99,6 +101,24 @@ object PolskaHub : Hub {
     @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) {
         val act = LocalContext.current as MainActivity
         var q by remember { mutableStateOf("") }
+        var result by remember { mutableStateOf<Triple<String, String, String>?>(null) }   // text, direction, via
+        var busy by remember { mutableStateOf(false) }
+        val scope = rememberCoroutineScope()
+        fun go(text: String, to: String) {
+            if (text.isBlank()) { Translation.openGoogle(act, "", to); return }
+            busy = true; result = null
+            scope.launch {
+                val r = runCatching { Translation.translateAny(text.trim(), to) }
+                busy = false
+                r.onSuccess { res ->
+                    result = Triple(res.text, to, res.via)
+                    if (to == "pl") Speaker.speak(act, res.text, PolishTime.PL)
+                }.onFailure {
+                    act.toast("Couldn't translate here – opening Google Translate")
+                    Translation.openGoogle(act, text, to)
+                }
+            }
+        }
         var gbp by remember { mutableStateOf("") }
         var apps by remember { mutableStateOf<List<HubApp>?>(null) }
         val polishPkgs = remember(vm.apps) { vm.apps.map { it.pkg }.filter { it.startsWith("pl.") } }
@@ -115,16 +135,32 @@ object PolskaHub : Hub {
                 Row(Modifier.fillMaxWidth().padding(top = 4.dp).border(1.dp, Faint, RoundedCornerShape(24.dp)).padding(start = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     BasicTextField(q, { q = it }, singleLine = true, textStyle = TextStyle(color = Fg, fontSize = 17.sp), cursorBrush = SolidColor(Sand),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go), keyboardActions = KeyboardActions(onGo = { translate(act, q, "en", "pl") }),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go), keyboardActions = KeyboardActions(onGo = { go(q, Translation.guessTo(q)) }),
                         modifier = Modifier.weight(1f).padding(vertical = 13.dp),
                         decorationBox = { inner -> Box { if (q.isEmpty()) Text("Translate…", color = Faint, fontSize = 17.sp); inner() } })
-                    Text("🎤", fontSize = 20.sp, modifier = Modifier.combinedClickable { act.listen("Say it in English") { it?.let { t -> q = t; translate(act, t, "en", "pl") } } }.padding(10.dp))
+                    Text("🎤", fontSize = 20.sp, modifier = Modifier.combinedClickable { act.listen("Say it in English") { it?.let { t -> q = t; go(t, "pl") } } }.padding(10.dp))
                 }
                 FlowRow(Modifier.padding(top = 6.dp)) {
-                    Chip("EN → PL") { translate(act, q, "en", "pl") }
-                    Chip("PL → EN") { translate(act, q, "pl", "en") }
-                    Chip("🎤 po polsku") { act.listen("Powiedz po polsku", "pl-PL") { it?.let { t -> q = t; translate(act, t, "pl", "en") } } }
+                    Chip("EN → PL") { go(q, "pl") }
+                    Chip("PL → EN") { go(q, "en") }
+                    Chip("🎤 po polsku") { act.listen("Powiedz po polsku", "pl-PL") { it?.let { t -> q = t; go(t, "en") } } }
                     Chip("Translate app") { translate(act, "", "en", "pl") }
+                }
+                if (busy) Note("Translating…")
+                result?.let { (text, to, via) ->
+                    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                        Text(if (to == "pl") "Polish" else "English", color = Dim, fontSize = 12.sp)
+                        Text(text, color = Fg, fontSize = 20.sp, modifier = Modifier.padding(vertical = 4.dp))
+                        FlowRow {
+                            Chip("🔊 say it") { Speaker.speak(act, text, if (to == "pl") PolishTime.PL else java.util.Locale.UK) }
+                            Chip("copy") {
+                                act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("translation", text))
+                                act.toast("Copied")
+                            }
+                            Chip("open in Google Translate") { Translation.openGoogle(act, q, to) }
+                        }
+                        if (via != "on the phone") Note("via $via" + (Translation.phoneError?.let { " – the on-phone model isn't available ($it)" } ?: ""))
+                    }
                 }
             }
             // ---- the Polish apps on this phone

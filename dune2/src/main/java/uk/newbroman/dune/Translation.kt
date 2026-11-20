@@ -53,6 +53,44 @@ object Translation {
         return tr.translate(text).await()
     }
 
+    /** A translation and where it came from ("on the phone", "Google", "MyMemory"). */
+    data class Result(val text: String, val via: String)
+
+    /** Why the on-phone model last failed, shown once so a broken download isn't silent. */
+    @Volatile var phoneError: String? = null
+
+    /**
+     * Translate into [to] ("pl"/"en"), from the other one: the on-phone model first, then Google's free
+     * web endpoint, then MyMemory. Throws only if all three fail.
+     */
+    suspend fun translateAny(text: String, to: String): Result {
+        val from = if (to == "pl") "en" else "pl"
+        val phone = runCatching { kotlinx.coroutines.withTimeout(60_000) { translate(text, to) } }
+        phone.getOrNull()?.let { phoneError = null; return Result(it, "on the phone") }
+        phoneError = phone.exceptionOrNull()?.let { it.message?.take(80) ?: it.javaClass.simpleName }
+        android.util.Log.w("Dune", "on-phone translation failed: $phoneError")
+        val q = java.net.URLEncoder.encode(text, "UTF-8")
+        val google = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val a = org.json.JSONArray(get("https://translate.googleapis.com/translate_a/single?client=gtx&sl=$from&tl=$to&dt=t&q=$q")).getJSONArray(0)
+            (0 until a.length()).joinToString("") { a.getJSONArray(it).optString(0) }
+        } }
+        google.getOrNull()?.takeIf { it.isNotBlank() }?.let { return Result(it, "Google") }
+        val mm = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val j = org.json.JSONObject(get("https://api.mymemory.translated.net/get?langpair=$from%7C$to&q=$q"))
+            if (j.optInt("responseStatus") != 200) throw IllegalStateException(j.optString("responseDetails", "MyMemory refused"))
+            android.text.Html.fromHtml(j.getJSONObject("responseData").getString("translatedText"), 0).toString()
+        }
+        return Result(mm, "MyMemory")
+    }
+
+    /** Google Translate (app if it takes the link, otherwise the website) with the direction set. */
+    fun openGoogle(ctx: Context, text: String, to: String) {
+        val from = if (to == "pl") "en" else "pl"
+        ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW,
+            android.net.Uri.parse("https://translate.google.com/?sl=$from&tl=$to&op=translate&text=" + android.net.Uri.encode(text)))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
     fun run(act: MainActivity, vm: LauncherVM, cmd: Cmd.Translate): String? {
         if (cmd.text.isBlank()) {
             // "translate from Polish": listen in Polish (or English), then translate
@@ -67,18 +105,17 @@ object Translation {
         val first = to !in ready
         val spoken = act.lastAskSpoken
         act.lifecycleScope.launch {
-            val r = runCatching { translate(cmd.text, to) }
+            val r = runCatching { translateAny(cmd.text, to) }
             val reply = r.fold(
-                onSuccess = { out ->
+                onSuccess = { res -> val out = res.text
                     if (to == "pl") Speaker.speak(act, out, PolishTime.PL)
                     else { if (spoken) Speaker.speak(act, out) }
-                    "“${cmd.text}” in ${if (to == "pl") "Polish" else "English"}: $out"
+                    "“${cmd.text}” in ${if (to == "pl") "Polish" else "English"}: $out" + if (res.via != "on the phone") "  (via ${res.via})" else ""
                 },
                 onFailure = {
                     android.util.Log.w("Dune", "translation failed", it)
-                    Actions.translate(act, cmd.text)
-                    if (first) "The translation model couldn't download (${it.javaClass.simpleName}) – opening Google Translate instead"
-                    else "Couldn't translate that – opening Google Translate"
+                    openGoogle(act, cmd.text, to)
+                    "Couldn't translate that here (${phoneError ?: it.javaClass.simpleName}) – opening Google Translate, ${if (to == "pl") "English → Polish" else "Polish → English"}"
                 })
             vm.assistantReply = reply
         }
