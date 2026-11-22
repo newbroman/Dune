@@ -283,6 +283,8 @@ class Store private constructor(ctx: Context) {
     val hubsFix241 = Flag("hubsFix241", false)
     val driveHotspot = Flag("driveHotspot", true)
     val phoneCamera = Flag("phoneCamera", true)
+    /** Dune's voice on the media volume (true) or the sat-nav guidance channel (false). Read by Speaker. */
+    val speakOnMedia = Flag("speakOnMedia", true)
     /** Learn hub: on opening, move Tongues to a fresh card and read it aloud (off: open silently). */
     val learnSpeakOnOpen = Flag("learnSpeakOnOpen", false)
     val driveHotspotOff = Flag("driveHotspotOff", true)

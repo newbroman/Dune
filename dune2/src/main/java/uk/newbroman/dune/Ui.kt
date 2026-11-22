@@ -837,6 +837,11 @@ fun SettingsScreen(vm: LauncherVM) {
                 "It reads new messages aloud and lets you reply by voice.")
             Field("Home address (for “navigate home”)", s.homeAddress)
             Field("BBC Sounds favourite shows, one per line (“play Unclassified”, “my Sounds favourites”)", s.soundsFavourites, multi = true)
+            Toggle("Dune's voice follows the media volume", s.speakOnMedia)
+            Note("On: Dune speaks at your media volume, and music dips while it talks. Off: it speaks on the sat-nav channel, " +
+                "whose volume is set separately (often only while a sat-nav is talking) – very quiet on some phones.")
+            LaunchedEffect(s.speakOnMedia.value) { Speaker.applyChannel(act) }
+            LinkRow("Test Dune's voice") { Speaker.speak(act, "This is Dune's voice at the current volume.") }
         }
         item { Toggle("Start automatically in the car", s.driveAuto) }
         item { Toggle("Read new messages aloud", s.driveReadAloud) }

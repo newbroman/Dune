@@ -31,16 +31,12 @@ object Speaker {
                     app.toast("Text-to-speech isn't available")
                     return@TextToSpeech
                 }
-                tts?.setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
-                )
+                applyChannel(app)
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(id: String?) { talking = true }
-                    override fun onDone(id: String?) { if (tts?.isSpeaking != true) talking = false }
-                    @Deprecated("old API") override fun onError(id: String?) { talking = false }
-                    override fun onStop(id: String?, interrupted: Boolean) { talking = false }
+                    override fun onStart(id: String?) { talking = true; duck(app, true) }
+                    override fun onDone(id: String?) { if (tts?.isSpeaking != true) { talking = false; duck(app, false) } }
+                    @Deprecated("old API") override fun onError(id: String?) { talking = false; duck(app, false) }
+                    override fun onStop(id: String?, interrupted: Boolean) { talking = false; duck(app, false) }
                 })
                 val q = pending.toList(); pending.clear()
                 q.forEachIndexed { i, (s, l) -> say(app, s, l, i == 0) }
@@ -70,4 +66,29 @@ object Speaker {
     }
 
     fun stop() { tts?.stop(); pending.clear(); talking = false }
+
+    /**
+     * Which volume Dune's voice follows. Media (the default) is the volume you turn up; the sat-nav
+     * guidance channel has a separate volume of its own that some phones (the Doogee) keep very low.
+     */
+    private var onMedia = true
+    private fun attrs(media: Boolean) = AudioAttributes.Builder()
+        .setUsage(if (media) AudioAttributes.USAGE_MEDIA else AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+
+    fun applyChannel(ctx: Context) {
+        onMedia = ctx.getSharedPreferences("dune", Context.MODE_PRIVATE).getBoolean("speakOnMedia", true)
+        tts?.setAudioAttributes(attrs(onMedia))
+    }
+
+    // On the media channel music no longer ducks by itself, so ask for it: duck while speaking, then give it back.
+    private var focus: android.media.AudioFocusRequest? = null
+    private fun duck(ctx: Context, on: Boolean) {
+        if (!onMedia) return
+        val am = ctx.getSystemService(android.media.AudioManager::class.java) ?: return
+        if (on && focus == null) {
+            focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(attrs(true)).build().also { am.requestAudioFocus(it) }
+        } else if (!on) focus?.let { am.abandonAudioFocusRequest(it); focus = null }
+    }
 }
