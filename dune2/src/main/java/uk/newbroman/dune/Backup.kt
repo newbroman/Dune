@@ -26,7 +26,7 @@ import javax.crypto.spec.SecretKeySpec
  */
 object Backup {
     private const val PREFS = "dune"
-    private val FILES = listOf("gis", "tracks", "scans.json", "webapps.json")
+    private val FILES = listOf("gis", "tracks", "scans.json", "webapps.json", Bookmarks.FILE)
     private const val MAX_FILE = 30L * 1024 * 1024
 
     // ---- the password-protected part

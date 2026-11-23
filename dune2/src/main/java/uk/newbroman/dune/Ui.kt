@@ -364,8 +364,8 @@ internal fun WeatherBlock(vm: LauncherVM) {
 @Composable
 internal fun FavouritesBlock(vm: LauncherVM) {
     val s = vm.store
-    // apps and web pages ("web:<url>") side by side
-    val favs: List<Any> = s.favourites.mapNotNull { k -> vm.appByKey(k) ?: vm.favWeb(k) }
+    // apps, web pages ("web:<url>") and home-screen links ("pin:<pkg>|<id>") side by side
+    val favs: List<Any> = s.favourites.mapNotNull { k -> vm.appByKey(k) ?: vm.favWeb(k) ?: vm.favPinned(k) }
     var picking by remember { mutableStateOf(false) }
     if (picking) AppPicker(vm, exclude = remember(picking) { favs.filterIsInstance<AppEntry>().map { it.pkg }.toSet() },
         onPick = { pkg -> vm.apps.firstOrNull { it.pkg == pkg }?.let { if (it.key !in s.favourites) s.toggleFavourite(it.key) } },
@@ -380,7 +380,7 @@ internal fun FavouritesBlock(vm: LauncherVM) {
         favs.chunked(5).forEach { row ->
             Row(Modifier.fillMaxWidth()) {
                 row.forEach { f -> Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                    if (f is AppEntry) FavIcon(vm, f) else FavWebIcon(vm, f as WebApp)
+                    when (f) { is AppEntry -> FavIcon(vm, f); is Pinned -> FavPinIcon(vm, f); else -> FavWebIcon(vm, f as WebApp) }
                 } }
                 repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
             }
@@ -405,6 +405,26 @@ private fun FavIcon(vm: LauncherVM, a: AppEntry) {
             DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(a.key) })
             DropdownMenuItem(text = { Text("Move or copy to group…") }, onClick = { menu = false; vm.moving = a })
             DropdownMenuItem(text = { Text("App info") }, onClick = { menu = false; vm.appInfo(a) })
+        }
+    }
+}
+
+@Composable
+private fun FavPinIcon(vm: LauncherVM, p: Pinned) {
+    val s = vm.store
+    val key = vm.pinKey(p)
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            Modifier.clip(RoundedCornerShape(14.dp))
+                .combinedClickable(onLongClick = { menu = true }, onClick = { vm.launchPinned(p) })
+                .padding(8.dp)
+        ) { LinkIcon(vm, p, 50.dp) }
+        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            Text(p.label, color = Dim, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+            DropdownMenuItem(text = { Text("Move left") }, onClick = { menu = false; s.moveFavourite(key, -1) })
+            DropdownMenuItem(text = { Text("Move right") }, onClick = { menu = false; s.moveFavourite(key, 1) })
+            DropdownMenuItem(text = { Text("Remove from favourites") }, onClick = { menu = false; s.toggleFavourite(key) })
         }
     }
 }
@@ -801,6 +821,7 @@ fun SettingsScreen(vm: LauncherVM) {
         item { Toggle("Weather on the sky", s.skyWeather) }
         item { Toggle("Turn the sky with the compass", s.skyCompass) }
         item { Toggle("Favourites", s.showFavs) }
+        item { Toggle("Bookmarks", s.showBookmarks) }
         item { Toggle("Termux shortcuts", s.showTermux) }
         item { Toggle("L14", s.showL14) }
         item { Toggle("Open keyboard with app list", s.autoKeyboard) }
@@ -1222,6 +1243,9 @@ private fun GridLink(vm: LauncherVM, p: Pinned) {
             )
         }
         DropdownMenu(menu, onDismissRequest = { menu = false }) {
+            val key = vm.pinKey(p)
+            DropdownMenuItem(text = { Text(if (key in vm.store.favourites) "Remove from favourites" else "Add to favourites") },
+                onClick = { menu = false; vm.store.toggleFavourite(key) })
             DropdownMenuItem(text = { Text("Remove link") }, onClick = { menu = false; vm.store.removePinned(p) })
         }
     }

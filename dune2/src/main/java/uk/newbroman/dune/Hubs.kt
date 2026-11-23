@@ -334,6 +334,8 @@ fun launchPkg(vm: LauncherVM, pkg: String) {
 
 object HomeHub : Hub {
     override val id = "home"; override val title = "Home"; override val glyph = "◉"
+    /** Bookmarks and home-screen links turn up in Dune's search. */
+    override fun search(ctx: Context, vm: LauncherVM, q: String) = bookmarkSearch(ctx, vm, q)
     @Composable override fun Page(vm: LauncherVM, active: Boolean, gestures: NestedScrollConnection) {
         val ctx = LocalContext.current
         val s = vm.store
@@ -365,6 +367,7 @@ object HomeHub : Hub {
             if (s.showPhrase.value && vm.phrase != null) item { Fold(vm, "phrase", "Phrase of the day") { PhraseBlock(vm) } }
             if (s.showWeather.value) item { Fold(vm, "weather", "Weather", vm.weather?.let { "${it.temp}° ${it.summary}" }) { WeatherBlock(vm) } }
             if (s.showFavs.value) item { Fold(vm, "favs", "Favourites") { FavouritesBlock(vm) } }
+            if (s.showBookmarks.value) item { Fold(vm, "bookmarks", "Bookmarks", bookmarksHint(vm)) { BookmarksBlock(vm) } }
             if (s.showWorkspaces.value && Workspaces.parse(s.workspaces.value).isNotEmpty()) item { Fold(vm, "workspaces", "Workspaces") { WorkspacesBlock(vm) } }
             if (s.showTermux.value) item { Fold(vm, "termux", "Termux") { TermuxBlock(vm) } }
             if (s.showL14.value) item { Fold(vm, "l14", "L14", s.l14Host.value.takeIf { it.isNotBlank() }?.let { l14Summary(vm.l14Online, vm.l14Status) }) { L14Block(vm) } }

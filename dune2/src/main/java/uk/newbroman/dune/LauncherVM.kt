@@ -274,8 +274,23 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         if (!key.startsWith("web:")) return null
         val url = key.removePrefix("web:")
         return webApps.firstOrNull { sameSite(it.url, url) }
-            ?: if (sameSite(url, PORTFOLIO)) PORTFOLIO_APP else WebApp(url.substringAfter("//").trimEnd('/'), url, "")
+            ?: if (sameSite(url, PORTFOLIO)) PORTFOLIO_APP
+            else WebApp(Bookmarks.byUrl(url)?.title?.replace(":", " ") ?: Bookmarks.host(url), url, "")
     }
+
+    /** A bookmark starred into Favourites (as "web:<url>"), fetching the site's icon the first time. */
+    fun toggleFavouriteUrl(url: String) {
+        val key = "web:$url"
+        store.toggleFavourite(key)
+        if (key in store.favourites) favWeb(key)?.let { w -> viewModelScope.launch {
+            WebApps.ensureIcons(ctx, listOf(w)); webIcons.remove(w.url); webIconLoading.remove(w.url); webIconsVersion++
+        } }
+    }
+
+    /** "Add to Home screen" pages (and other pinned shortcuts) in Favourites, stored as "pin:<package>|<id>". */
+    fun pinKey(p: Pinned) = "pin:" + p.pkg + "|" + p.id
+    fun favPinned(key: String): Pinned? =
+        if (!key.startsWith("pin:")) null else store.pinned.firstOrNull { pinKey(it) == key }
 
     private fun sameSite(a: String, b: String) = a.trimEnd('/').equals(b.trimEnd('/'), true)
 
@@ -320,7 +335,9 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         Drive.init(app)
         viewModelScope.launch {
             webApps = WebApps.all(app)
-            WebApps.ensureIcons(app, webApps + PORTFOLIO_APP); webIcons.clear(); webIconLoading.clear(); webIconsVersion++
+            kotlinx.coroutines.withContext(Dispatchers.IO) { Bookmarks.ensure(app) }
+            WebApps.ensureIcons(app, webApps + PORTFOLIO_APP + store.favourites.filter { it.startsWith("web:") }.mapNotNull { favWeb(it) })
+            webIcons.clear(); webIconLoading.clear(); webIconsVersion++
             if (WebApps.refresh(app)) { webApps = WebApps.all(app); webIcons.clear(); webIconLoading.clear(); webIconsVersion++ }
         }
         viewModelScope.launch {

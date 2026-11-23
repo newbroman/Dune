@@ -70,6 +70,7 @@ class Store private constructor(ctx: Context) {
     val autoKeyboard = Flag("autoKeyboard", true)
     val showWeather = Flag("showWeather", true)
     val showFavs = Flag("showFavs", true)
+    val showBookmarks = Flag("showBookmarks", true)
     val showTermux = Flag("showTermux", true)
     val showL14 = Flag("showL14", true)
     val showSky = Flag("showSky", true)

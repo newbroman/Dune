@@ -30,6 +30,7 @@ val SETTINGS_INDEX: List<Pair<String, String>> = listOf(
     "Weather on the sky" to "Home screen",
     "Turn the sky with the compass" to "Home screen",
     "Favourites" to "Home screen",
+    "Bookmarks" to "Home screen",
     "Termux shortcuts" to "Home screen",
     "L14" to "Home screen",
     "Open keyboard with app list" to "Home screen",
