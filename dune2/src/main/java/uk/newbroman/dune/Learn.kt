@@ -99,7 +99,8 @@ object LearnHub : Hub {
                         vm.webApps.filter { it.isLanguage && !it.url.contains("/cloze") && !it.url.contains("/rozmowa") }.forEach { w ->
                             DropdownMenuItem(text = { Text(w.label) }, onClick = { more = false; vm.openWeb(w) })
                         }
-                        PolskaHub.spiewnik(vm)?.let { a -> DropdownMenuItem(text = { Text("Śpiewnik (songs)") }, onClick = { more = false; vm.launch(a) }) }
+                        DropdownMenuItem(text = { Text("Śpiewnik (songs)") }, onClick = { more = false
+                            PolskaHub.spiewnik(vm)?.let { vm.launch(it) } ?: act.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(PolskaHub.SPIEWNIK_URL))) })
                         listOf("com.duolingo", "com.clozemaster.v2", "com.memrise.android.memrisecompanion", "com.ichi2.anki")
                             .filter { p -> vm.apps.any { it.pkg == p } }.forEach { p ->
                                 DropdownMenuItem(text = { Text(vm.labelFor(p)) }, onClick = { more = false; launchPkg(vm, p) })

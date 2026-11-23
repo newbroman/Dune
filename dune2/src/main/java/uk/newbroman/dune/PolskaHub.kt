@@ -211,12 +211,15 @@ object PolskaHub : Hub {
                     Chip("Rozmowa") { vm.jumpHub = "rozmowa" }
                     Chip("Tongues (Polish)") { vm.screen = Screen.CLOZE }
                     Chip("Polish phrases") { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(Phrases.APP_URL))) }
-                    spiewnik(vm)?.let { a -> Chip("Śpiewnik (songs)") { vm.launch(a) } }
+                    Chip("Śpiewnik (songs)") { spiewnik(vm)?.let { vm.launch(it) } ?: act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(SPIEWNIK_URL))) }
                     Chip("time in Polish") { Speaker.speak(act, PolishTime.spoken(java.time.LocalDateTime.now(WARSAW)), PolishTime.PL); act.toast(PolishTime.spoken(java.time.LocalDateTime.now(WARSAW))) }
                 }
             }
         }
     }
+
+    /** Śpiewnik's production address (newbroman/Spiewnik main), for when it isn't installed on the phone. */
+    const val SPIEWNIK_URL = "https://spiewnik-seven.vercel.app"
 
     /** Śpiewnik, learning Polish through song lyrics – installed on the phone as a web app, found by its name. */
     fun spiewnik(vm: LauncherVM) = vm.apps.firstOrNull { it.label.contains("śpiewnik", true) || it.label.contains("spiewnik", true) }
