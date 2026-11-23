@@ -39,7 +39,7 @@ enum class Screen { HOME, DRAWER, SETTINGS, GROUP, DRIVE, WIDGET_PICK, ROZMOWA, 
 
 /** Group rules: "Name | keyword, keyword". First matching group wins; a manual move always wins. */
 val DEFAULT_GROUP_RULES = """
-Languages | polish, polski, welsh, cymraeg, diarhebion, german, deutsch, vietnam, norwegian, norsk, nynorsk, bokmål, language, duolingo, babbel, memrise, anki, busuu, lingo, phrase, proverb, przysłow, translate, dictionary, słownik
+Languages | polish, polski, śpiewnik, spiewnik, welsh, cymraeg, diarhebion, german, deutsch, vietnam, norwegian, norsk, nynorsk, bokmål, language, duolingo, babbel, memrise, anki, busuu, lingo, phrase, proverb, przysłow, translate, dictionary, słownik
 My apps | @web:newbroman.github.io, uk.newbroman, newbroman, spheres, source check, flight checker, newborough
 AI | gemini, claude, chatgpt, copilot, perplexity, grok, deepseek, meta ai, le chat, mistral
 Web | com.android.chrome, chrome, firefox, =google, browser, duckduckgo, brave, opera, microsoft edge, =edge, kiwi, vivaldi, ecosia, startpage

@@ -83,6 +83,12 @@ class Store private constructor(ctx: Context) {
     val skyCompass = Flag("skyCompass", true)
     val skyWeather = Flag("skyWeather", true)
     val groupRules = Str("groupRules", DEFAULT_GROUP_RULES)
+    init {
+        // rules saved before Śpiewnik existed: put it in Languages without losing anything changed by hand
+        val r = groupRules.value
+        if (!r.contains("śpiewnik", true)) groupRules.set(r.lines().joinToString("\n") { l ->
+            if (l.trimStart().startsWith("Languages", true) && l.contains("|")) "$l, śpiewnik, spiewnik" else l })
+    }
 
     // Polish and assistant
     val polishClock = Flag("polishClock", true)

@@ -79,7 +79,7 @@ object PolskaHub : Hub {
     /** Names that mark an app as Polish (or for Poland). */
     private val WORDS = listOf("allegro", "mobilet", "mobywatel", "jakdojade", "koleo", "pkp", "intercity", "inpost", "olx", "żabka", "zabka",
         "biedronka", "orlen", "blik", "mbank", "poland", "polska", "polski", "polsk", "polish", "warszaw", "kraków", "krakow", "wrocław",
-        "gdańsk", "gdansk", "tatry", "szlak", "turyst", "hiking", "mapa", "bilet", "mpk", "ztm", "translate", "tłumacz")
+        "gdańsk", "gdansk", "tatry", "szlak", "turyst", "hiking", "mapa", "bilet", "mpk", "ztm", "translate", "tłumacz", "śpiewnik", "spiewnik")
     private val WARSAW: ZoneId = ZoneId.of("Europe/Warsaw")
 
     @Composable override fun summary(vm: LauncherVM): String {
@@ -211,11 +211,15 @@ object PolskaHub : Hub {
                     Chip("Rozmowa") { vm.jumpHub = "rozmowa" }
                     Chip("Tongues (Polish)") { vm.screen = Screen.CLOZE }
                     Chip("Polish phrases") { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(Phrases.APP_URL))) }
+                    spiewnik(vm)?.let { a -> Chip("Śpiewnik (songs)") { vm.launch(a) } }
                     Chip("time in Polish") { Speaker.speak(act, PolishTime.spoken(java.time.LocalDateTime.now(WARSAW)), PolishTime.PL); act.toast(PolishTime.spoken(java.time.LocalDateTime.now(WARSAW))) }
                 }
             }
         }
     }
+
+    /** Śpiewnik, learning Polish through song lyrics – installed on the phone as a web app, found by its name. */
+    fun spiewnik(vm: LauncherVM) = vm.apps.firstOrNull { it.label.contains("śpiewnik", true) || it.label.contains("spiewnik", true) }
 
     @Composable private fun Section(t: String) = Text(t.uppercase(), color = Dim, fontSize = 12.sp, letterSpacing = 2.sp,
         modifier = Modifier.padding(top = 20.dp, bottom = 6.dp))
