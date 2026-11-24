@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
 
     fun handleAsk(text: String, speak: Boolean = vm.screen == Screen.DRIVE, voice: Boolean = false) {
         vm.assistantFallback = null
+        vm.pictures = null
         lastAskSpoken = speak || voice
         val cmd = Assistant.interpret(text)
         // Anything Dune can't do itself goes to the AI, if one is set up.

@@ -35,6 +35,8 @@ sealed class Cmd {
     object PhraseOfDay : Cmd()
     /** “new conversation”: Dune AI forgets the conversation so far. */
     object NewChat : Cmd()
+    /** “show me a picture of Pluto”: pictures from Wikipedia and Wikimedia Commons. */
+    data class Pictures(val subject: String) : Cmd()
     object ReadMessages : Cmd()
     data class Unknown(val text: String) : Cmd()
 }
@@ -64,6 +66,10 @@ object Assistant {
         // Dune AI's memory of the conversation
         if (Regex("^(start (a )?)?(new|fresh) (conversation|chat|topic)$|^(start|begin) (again|afresh|over)$|^forget (that|it|this|our conversation|the conversation|everything)$|" +
                 "^clear (the |our )?(conversation|chat)$|^change (the )?subject$").matches(s)) return Cmd.NewChat
+
+        // "show me a picture of Pluto", "what does a puffin look like"
+        uk.newbroman.dune.Pictures.parse(s)?.let { sub -> val c = cased(t, s); val i = s.lastIndexOf(sub)
+            return Cmd.Pictures(if (i >= 0 && c.length == s.length) c.substring(i, i + sub.length) else sub) }
 
         // Drive mode
         if (Regex("^(exit|stop|end|leave|close) (drive|driving)( mode)?$").matches(s)) return Cmd.DriveMode(false)
@@ -233,6 +239,7 @@ object Assistant {
             }
             is Cmd.Search -> { Actions.webSearch(act, cmd.q); "Searching for ${cmd.q}" }
             is Cmd.Translate -> Translation.run(act, vm, cmd)
+            is Cmd.Pictures -> uk.newbroman.dune.Pictures.run(act, vm, cmd.subject, cmd.subject.let { "Show me a picture of $it" })
             is Cmd.Spotify -> {
                 if (cmd.q == null) { act.launchPackage(SPOTIFY) || act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:"))); "Opening Spotify" }
                 else { act.tryStart(Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(cmd.q))), "Spotify isn't installed"); "Searching Spotify for ${cmd.q}" }

@@ -291,7 +291,7 @@ internal fun AssistantBlock(vm: LauncherVM) {
     }
     vm.assistantReply?.let {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
-            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList() })
+            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList(); vm.pictures = null })
         // The web pages it used: tap to open. While Dune remembers the conversation, a follow-up can just
         // say "and tomorrow?" – "New conversation" makes it forget.
         val remembered = Brain.Chat.size
@@ -307,6 +307,7 @@ internal fun AssistantBlock(vm: LauncherVM) {
             }
         }
     }
+    Pictures.Panel(vm)
     Listen.PickPanel(vm)
     if (!Brain.ready(act)) vm.assistantFallback?.let { f ->
         FlowRow(Modifier.padding(top = 6.dp)) {
