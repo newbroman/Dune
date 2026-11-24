@@ -33,6 +33,8 @@ sealed class Cmd {
     data class DriveMode(val on: Boolean) : Cmd()
     object TimeInPolish : Cmd()
     object PhraseOfDay : Cmd()
+    /** “new conversation”: Dune AI forgets the conversation so far. */
+    object NewChat : Cmd()
     object ReadMessages : Cmd()
     data class Unknown(val text: String) : Cmd()
 }
@@ -58,6 +60,10 @@ object Assistant {
             if (s == before) break
         }
         fun after(re: String): String? = Regex(re).find(s)?.let { m -> cased(t, s).substring(m.range.last + 1).trim().ifEmpty { null } }
+
+        // Dune AI's memory of the conversation
+        if (Regex("^(start (a )?)?(new|fresh) (conversation|chat|topic)$|^(start|begin) (again|afresh|over)$|^forget (that|it|this|our conversation|the conversation|everything)$|" +
+                "^clear (the |our )?(conversation|chat)$|^change (the )?subject$").matches(s)) return Cmd.NewChat
 
         // Drive mode
         if (Regex("^(exit|stop|end|leave|close) (drive|driving)( mode)?$").matches(s)) return Cmd.DriveMode(false)
@@ -266,6 +272,7 @@ object Assistant {
             is Cmd.Dial -> { Find.callNow(act, Person(cmd.number, cmd.number)); "Calling ${cmd.number}" }
             is Cmd.DriveMode -> { Drive.set(act, cmd.on); if (cmd.on) vm.screen = Screen.DRIVE else vm.goHome(); null }
             Cmd.TimeInPolish -> { Speaker.speak(act, PolishTime.spoken(LocalDateTime.now()), PolishTime.PL); PolishTime.spoken(LocalDateTime.now()) }
+            Cmd.NewChat -> { Brain.Chat.clear(); vm.assistantSources = emptyList(); "Fresh start – I've forgotten our conversation." }
             Cmd.PhraseOfDay -> {
                 val p = vm.phrase ?: return "No phrase yet"
                 Speaker.speak(act, p.pl, PolishTime.PL); Speaker.speak(act, p.en, flush = false)

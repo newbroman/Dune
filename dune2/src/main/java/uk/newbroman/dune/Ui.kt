@@ -292,12 +292,18 @@ internal fun AssistantBlock(vm: LauncherVM) {
     vm.assistantReply?.let {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
             .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList() })
-        // The web pages it used: tap to open.
-        if (vm.assistantSources.isNotEmpty()) FlowRow(Modifier.padding(top = 4.dp)) {
+        // The web pages it used: tap to open. While Dune remembers the conversation, a follow-up can just
+        // say "and tomorrow?" – "New conversation" makes it forget.
+        val remembered = Brain.Chat.size
+        if (vm.assistantSources.isNotEmpty() || (remembered > 0 && !vm.aiBusy)) FlowRow(Modifier.padding(top = 4.dp)) {
             vm.assistantSources.forEach { (title, url) ->
                 Chip("↗ " + title.take(28).ifBlank { android.net.Uri.parse(url).host ?: "source" }) {
                     act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
                 }
+            }
+            if (remembered > 0 && !vm.aiBusy) Chip("↺ New conversation") {
+                Brain.Chat.clear(); vm.assistantReply = null; vm.assistantSources = emptyList()
+                act.toast("Dune has forgotten the conversation")
             }
         }
     }

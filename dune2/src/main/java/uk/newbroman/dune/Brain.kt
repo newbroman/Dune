@@ -261,19 +261,63 @@ background doesn't contain what he asks about, say so plainly rather than guessi
      * to use it: OpenAI (Responses web_search), OpenRouter (its web_search tool), Claude (web search
      * tool), Gemini (Google Search). If a service refuses search, the question is asked again without it.
      */
-    suspend fun askFull(ctx: Context, store: Store, question: String, spoken: Boolean = false): Answer = withContext(Dispatchers.IO) {
+    /**
+     * The conversation so far, so a follow-up ("and tomorrow?", "who wrote it?", "say that more simply") knows
+     * what "it" is. Kept on the phone in memory only: the last [MAX] questions and answers, forgotten after
+     * [IDLE_MS] without a question, when Dune is closed, or on "new conversation".
+     */
+    object Chat {
+        const val MAX = 8
+        const val IDLE_MS = 20 * 60_000L
+        private val turns = ArrayList<Pair<String, String>>()
+        @Volatile private var lastAt = 0L
+        /** Questions remembered right now (0 = the next question starts afresh). */
+        private val count = androidx.compose.runtime.mutableIntStateOf(0)
+        val size: Int get() = count.intValue
+        @Synchronized fun history(now: Long = System.currentTimeMillis()): List<Pair<String, String>> {
+            if (turns.isNotEmpty() && now - lastAt > IDLE_MS) clear()
+            return turns.toList()
+        }
+        @Synchronized fun add(q: String, a: String, now: Long = System.currentTimeMillis()) {
+            if (q.isBlank() || a.isBlank()) return
+            if (turns.isNotEmpty() && now - lastAt > IDLE_MS) turns.clear()
+            turns += q.take(1500) to a.take(2500)
+            while (turns.size > MAX) turns.removeAt(0)
+            lastAt = now; count.intValue = turns.size
+        }
+        @Synchronized fun clear() { turns.clear(); lastAt = 0; count.intValue = 0 }
+    }
+
+    /** History as chat messages (user, assistant, user, …), oldest first. */
+    fun historyMessages(h: List<Pair<String, String>>): JSONArray = JSONArray().also { a ->
+        h.forEach { (q, ans) ->
+            a.put(JSONObject().put("role", "user").put("content", q))
+            a.put(JSONObject().put("role", "assistant").put("content", ans))
+        }
+    }
+
+    suspend fun askFull(ctx: Context, store: Store, question: String, spoken: Boolean = false, remember: Boolean = true): Answer = withContext(Dispatchers.IO) {
+        val hist = if (remember) Chat.history() else emptyList()
+        val a = askOnce(ctx, store, question, spoken, hist)
+        if (remember) Chat.add(question, a.text.substringBefore("\n(web search unavailable"))
+        a
+    }
+
+    private suspend fun askOnce(ctx: Context, store: Store, question: String, spoken: Boolean, hist: List<Pair<String, String>>): Answer = withContext(Dispatchers.IO) {
         val key = key(ctx) ?: throw IllegalStateException("Add an AI key in Dune's settings first")
         val p = provider(ctx); val model = model(ctx)
         val web = webOn(ctx)
         val sys = SYSTEM + (if (spoken) "\nHe is driving: answer in one or two short spoken sentences." else "") +
             (if (web) "\nYou can search the web. Do so when the question needs current or outside facts (news, prices, opening times, " +
                 "tides, sports, travel, anything after your training); otherwise answer directly. Mention where facts came from in a few words." else "") +
+            (if (hist.isNotEmpty()) "\nThe earlier messages are this conversation so far: read a short or vague question (\"and tomorrow?\", \"why?\", \"who wrote it?\") " +
+                "as following on from them. If it plainly starts a new subject, just answer that." else "") +
             "\n\nBACKGROUND\n" + context(ctx, store, locationLine(ctx))
-        if (web) runCatching { return@withContext askWeb(p, key, model, sys, question, spoken) }
+        if (web) runCatching { return@withContext askWeb(p, key, model, sys, question, spoken, hist) }
             .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e
-                val plain = askPlain(p, key, model, sys, question, spoken)
+                val plain = askPlain(p, key, model, sys, question, spoken, hist)
                 return@withContext plain.copy(text = plain.text + "\n(web search unavailable: ${e.message?.take(80)})") }
-        askPlain(p, key, model, sys, question, spoken)
+        askPlain(p, key, model, sys, question, spoken, hist)
     }
 
     private class Reply(val ok: Boolean, val code: Int, val json: JSONObject?)
@@ -294,10 +338,16 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         if (p.id == "openrouter") { put("HTTP-Referer", "https://github.com/newbroman/Dune"); put("X-Title", "Dune") }
     }
 
-    private fun askPlain(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean): Answer {
-        val body = JSONObject().put("model", model).put("messages", JSONArray()
-            .put(JSONObject().put("role", "system").put("content", sys))
-            .put(JSONObject().put("role", "user").put("content", question)))
+    /** system, then the conversation so far, then the new question. */
+    fun chatMessages(sys: String?, hist: List<Pair<String, String>>, question: String): JSONArray {
+        val a = JSONArray()
+        if (sys != null) a.put(JSONObject().put("role", "system").put("content", sys))
+        val h = historyMessages(hist); for (i in 0 until h.length()) a.put(h.get(i))
+        return a.put(JSONObject().put("role", "user").put("content", question))
+    }
+
+    private fun askPlain(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean, hist: List<Pair<String, String>>): Answer {
+        val body = JSONObject().put("model", model).put("messages", chatMessages(sys, hist, question))
         if (p.id == "claude") body.put("max_tokens", if (spoken) 300 else 1200)
         if (Regex("^(openai/)?(gpt-5|o\\d)").containsMatchIn(model) || (p.id == "gemini" && model.startsWith("gemini-3"))) body.put("reasoning_effort", "low")
         val r = post(p.url, body, auth(p, key))
@@ -305,29 +355,34 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         return parseChat(r.json!!)
     }
 
-    private fun askWeb(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean): Answer = when (p.id) {
+    private fun askWeb(p: Provider, key: String, model: String, sys: String, question: String, spoken: Boolean, hist: List<Pair<String, String>>): Answer = when (p.id) {
         "openai" -> {
-            val body = JSONObject().put("model", model).put("instructions", sys).put("input", question)
+            val body = JSONObject().put("model", model).put("instructions", sys).put("input", if (hist.isEmpty()) question else chatMessages(null, hist, question))
                 .put("tools", JSONArray().put(JSONObject().put("type", "web_search")))
             if (Regex("^(gpt-5|o\\d)").containsMatchIn(model)) body.put("reasoning", JSONObject().put("effort", "low"))
             val r = post("https://api.openai.com/v1/responses", body, auth(p, key)); if (!r.ok) fail(r); parseResponses(r.json!!)
         }
         "openrouter" -> {
-            val body = JSONObject().put("model", model).put("messages", JSONArray()
-                .put(JSONObject().put("role", "system").put("content", sys)).put(JSONObject().put("role", "user").put("content", question)))
+            val body = JSONObject().put("model", model).put("messages", chatMessages(sys, hist, question))
                 .put("tools", JSONArray().put(JSONObject().put("type", "openrouter:web_search").put("parameters", JSONObject().put("max_results", 5))))
             val r = post(p.url, body, auth(p, key)); if (!r.ok) fail(r); parseChat(r.json!!)
         }
         "claude" -> {
             val body = JSONObject().put("model", model).put("max_tokens", if (spoken) 400 else 1500).put("system", sys)
-                .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", question)))
+                .put("messages", chatMessages(null, hist, question))
                 .put("tools", JSONArray().put(JSONObject().put("type", "web_search_20250305").put("name", "web_search").put("max_uses", 3)))
             val r = post("https://api.anthropic.com/v1/messages", body, mapOf("x-api-key" to key, "anthropic-version" to "2023-06-01"))
             if (!r.ok) fail(r); parseClaude(r.json!!)
         }
         "gemini" -> {
             val body = JSONObject().put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", sys))))
-                .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", question)))))
+                .put("contents", JSONArray().also { c ->
+                    hist.forEach { (q, ans) ->
+                        c.put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", q))))
+                        c.put(JSONObject().put("role", "model").put("parts", JSONArray().put(JSONObject().put("text", ans))))
+                    }
+                    c.put(JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", question))))
+                })
                 .put("tools", JSONArray().put(JSONObject().put("google_search", JSONObject())))
             val r = post("https://generativelanguage.googleapis.com/v1beta/models/${model.removePrefix("models/")}:generateContent", body, mapOf("x-goog-api-key" to key))
             if (!r.ok) fail(r); parseGemini(r.json!!)

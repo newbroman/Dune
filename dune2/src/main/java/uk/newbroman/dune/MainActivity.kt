@@ -79,6 +79,8 @@ class MainActivity : ComponentActivity() {
         }
         if (cmd is Cmd.Unknown && Brain.ready(this)) { vm.askAi(text, speak, sayIt = voice); return }
         val reply = Assistant.run(this, vm, cmd)
+        // what Dune answered itself is part of the conversation too ("what's the weather" … "and tomorrow?")
+        if (reply != null && cmd !is Cmd.Unknown && cmd !is Cmd.NewChat && !reply.endsWith("…") && Brain.ready(this)) Brain.Chat.add(text, reply)
         vm.assistantReply = reply ?: if (vm.assistantFallback != null)
             "“${vm.assistantFallback}” – Dune can't answer questions yet: no AI key is set up in this Dune (keys from the old Dune don't carry over). Tap “Set up AI”, or ask one of these:"
             else null
