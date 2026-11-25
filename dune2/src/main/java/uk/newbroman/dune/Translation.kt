@@ -65,7 +65,10 @@ object Translation {
      */
     suspend fun translateAny(text: String, to: String): Result {
         val from = if (to == "pl") "en" else "pl"
-        val phone = runCatching { kotlinx.coroutines.withTimeout(60_000) { translate(text, to) } }
+        // a model already on the phone answers in well under a second. One that is still downloading (the first
+        // Polish→English, ~30 MB) mustn't hold the answer up: the download carries on by itself, and this time
+        // the web answers instead.
+        val phone = runCatching { kotlinx.coroutines.withTimeout(if (to in ready) 15_000 else 4_000) { translate(text, to) } }
         phone.getOrNull()?.let { phoneError = null; return Result(it, "on the phone") }
         phoneError = phone.exceptionOrNull()?.let { it.message?.take(80) ?: it.javaClass.simpleName }
         android.util.Log.w("Dune", "on-phone translation failed: $phoneError")
@@ -80,12 +83,18 @@ object Translation {
             if (j.optInt("responseStatus") != 200) throw IllegalStateException(j.optString("responseDetails", "MyMemory refused"))
             android.text.Html.fromHtml(j.getJSONObject("responseData").getString("translatedText"), 0).toString()
         }
-        return Result(mm, "MyMemory")
+        if (mm.isNotBlank()) return Result(mm, "MyMemory")
+        // no web either: wait for the on-phone model after all
+        return Result(kotlinx.coroutines.withTimeout(90_000) { translate(text, to) }, "on the phone")
     }
 
     /** Google Translate (app if it takes the link, otherwise the website) with the direction set. */
     fun openGoogle(ctx: Context, text: String, to: String) {
         val from = if (to == "pl") "en" else "pl"
+        // the Translate app takes the text itself (it works out the language); the website link only sets the direction
+        if (text.isNotBlank() && ctx.packageManager.getLaunchIntentForPackage(TRANSLATE) != null &&
+            ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(android.content.Intent.EXTRA_TEXT, text).setPackage(TRANSLATE).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))) return
         ctx.tryStart(android.content.Intent(android.content.Intent.ACTION_VIEW,
             android.net.Uri.parse("https://translate.google.com/?sl=$from&tl=$to&op=translate&text=" + android.net.Uri.encode(text)))
             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))

@@ -104,15 +104,17 @@ object PolskaHub : Hub {
         var result by remember { mutableStateOf<Triple<String, String, String>?>(null) }   // text, direction, via
         var busy by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         fun go(text: String, to: String) {
-            if (text.isBlank()) { Translation.openGoogle(act, "", to); return }
+            keyboard?.hide()   // so the answer underneath isn't hidden behind it
+            if (text.isBlank()) { act.toast("Type a phrase first"); return }
             busy = true; result = null
             scope.launch {
                 val r = runCatching { Translation.translateAny(text.trim(), to) }
                 busy = false
                 r.onSuccess { res ->
                     result = Triple(res.text, to, res.via)
-                    if (to == "pl") Speaker.speak(act, res.text, PolishTime.PL)
+                    Speaker.speak(act, res.text, if (to == "pl") PolishTime.PL else java.util.Locale.UK)
                 }.onFailure {
                     act.toast("Couldn't translate here – opening Google Translate")
                     Translation.openGoogle(act, text, to)
@@ -144,9 +146,11 @@ object PolskaHub : Hub {
                     Chip("EN → PL") { go(q, "pl") }
                     Chip("PL → EN") { go(q, "en") }
                     Chip("🎤 po polsku") { act.listen("Powiedz po polsku", "pl-PL") { it?.let { t -> q = t; go(t, "en") } } }
-                    Chip("Translate app") { translate(act, "", "en", "pl") }
+                    // hands over what's typed, so it needn't be typed again
+                    Chip("Translate app") { val pl = Translation.guessTo(q) == "en"; translate(act, q.trim(), if (pl) "pl" else "en", if (pl) "en" else "pl") }
                 }
-                if (busy) Note("Translating…")
+                if (busy) Note(if (q.isBlank()) "Translating…" else "Translating “${q.trim().take(40)}”…")
+                if (q.isBlank() && !busy && result == null) Note("Type or say a phrase, then EN → PL or PL → EN.")
                 result?.let { (text, to, via) ->
                     Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
                         Text(if (to == "pl") "Polish" else "English", color = Dim, fontSize = 12.sp)
@@ -157,7 +161,7 @@ object PolskaHub : Hub {
                                 act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("translation", text))
                                 act.toast("Copied")
                             }
-                            Chip("open in Google Translate") { Translation.openGoogle(act, q, to) }
+                            Chip("open in Google Translate") { translate(act, q.trim(), if (to == "pl") "en" else "pl", to) }
                         }
                         if (via != "on the phone") Note("via $via" + (Translation.phoneError?.let { " – the on-phone model isn't available ($it)" } ?: ""))
                     }
