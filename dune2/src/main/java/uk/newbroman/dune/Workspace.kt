@@ -28,6 +28,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -181,8 +183,22 @@ fun AiSettings(vm: LauncherVM) {
     val act = LocalContext.current as MainActivity
     var tick by remember { mutableIntStateOf(0) }
     val p = remember(tick) { Brain.provider(act) }
-    val hasKey = remember(tick) { Brain.ready(act) }
     var key by rememberSaveable { mutableStateOf("") }
+    val hasKey = remember(tick) { Brain.readyFor(act, p.id) }
+    var testing by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    // save, under whoever's key it actually is, then try it straight away
+    fun saveAndTest(k: String) {
+        val whose = Brain.providerForKey(k)
+        if (whose != null && whose != p.id) {
+            Brain.setProvider(act, whose)
+            act.toast("That looks like your ${Brain.PROVIDERS.first { it.id == whose }.name} key – saved it there, not as the ${p.name} key")
+        }
+        Brain.setKey(act, k); key = ""; tick++
+        val id = Brain.provider(act).id
+        testing = "Trying the key…"
+        scope.launch { testing = Brain.test(act, id)?.let { "✗ $it" } ?: "✓ The key works" }
+    }
     var model by remember(tick) { mutableStateOf(Brain.model(act)) }
     Note("Ask Dune anything it can't do itself – “when is Tom coming?”, “what's on this week?”, “catch me up” – and an AI " +
         "answers using your messages, tasks and calendar. It uses your own key, stored encrypted on this phone. " +
@@ -190,12 +206,13 @@ fun AiSettings(vm: LauncherVM) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Brain.PROVIDERS.forEach { pr ->
             Text(pr.name, color = if (pr.id == p.id) Sand else Dim, fontSize = 16.sp,
-                modifier = Modifier.combinedClickable { Brain.setProvider(act, pr.id); key = ""; tick++ }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp))
+                modifier = Modifier.combinedClickable { Brain.setProvider(act, pr.id); key = ""; testing = null; tick++ }.padding(end = 16.dp, top = 8.dp, bottom = 8.dp))
         }
     }
     if (hasKey) {
         Note("✓ ${p.name} key saved")
-        LinkRow("Remove the ${p.name} key") { Brain.setKey(act, null); tick++ }
+        LinkRow("Test the ${p.name} key") { testing = "Trying the key…"; scope.launch { testing = Brain.test(act, p.id)?.let { "✗ $it" } ?: "✓ The key works" } }
+        LinkRow("Remove the ${p.name} key") { Brain.setKey(act, null); testing = null; tick++ }
     } else {
         OutlinedTextField(key, { key = it }, label = { Text("${p.name} key  (${p.keyHint})") }, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
@@ -206,7 +223,7 @@ fun AiSettings(vm: LauncherVM) {
                 if (t.isNullOrBlank()) act.toast("Nothing copied yet – copy the key first") else key = t
             }.padding(end = 24.dp, top = 10.dp, bottom = 10.dp))
             Text("Save the key", color = if (key.isNotBlank()) Fg else Dim, fontSize = 16.sp, modifier = Modifier.combinedClickable {
-                if (key.isNotBlank()) { Brain.setKey(act, key); key = ""; tick++; act.toast("Saved") } else act.toast("Paste or type the key first")
+                if (key.isNotBlank()) saveAndTest(key) else act.toast("Paste or type the key first")
             }.padding(vertical = 10.dp))
         }
         LinkRow("Get or copy a ${p.name} key (opens ${Brain.keyPage(p.id).substringAfter("//").substringBefore('/')})") {
@@ -214,6 +231,9 @@ fun AiSettings(vm: LauncherVM) {
         }
         Note("Your Rozmowa / Polish app key works here too. A key is only shown in full once when it's made – if you can't copy it, make a new one on that page.")
     }
+    testing?.let { Note(it) }
+    val others = remember(tick) { Brain.PROVIDERS.filter { it.id != p.id && Brain.readyFor(act, it.id) }.map { it.name } }
+    if (others.isNotEmpty()) Note("Also saved: ${others.joinToString()}. Dune asks ${p.name} first and, if that fails, the next one.")
     OutlinedTextField(model, { model = it; Brain.setModel(act, it) }, label = { Text("Model (blank = ${p.defaultModel})") },
         singleLine = true, modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp))
     if (p.id == "openrouter") Note("Free OpenRouter models (ending :free) may keep what you send. Use a paid model for your messages.")

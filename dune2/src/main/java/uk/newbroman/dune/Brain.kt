@@ -145,7 +145,29 @@ object Brain {
         prefs(ctx).edit().putBoolean("aiHasKey_" + provider(ctx).id, Secure.get(ctx, "ai_" + provider(ctx).id) != null).apply()
     }
     /** Cheap check (no Keystore call), safe to use while drawing the screen. */
-    fun ready(ctx: Context) = prefs(ctx).getBoolean("aiHasKey_" + provider(ctx).id, false)
+    fun ready(ctx: Context) = PROVIDERS.any { readyFor(ctx, it.id) }
+    fun readyFor(ctx: Context, id: String) = prefs(ctx).getBoolean("aiHasKey_$id", false)
+    fun keyFor(ctx: Context, id: String) = Secure.get(ctx, "ai_$id")
+    fun modelFor(ctx: Context, id: String) = PROVIDERS.first { it.id == id }.let { p -> prefs(ctx).getString("aiModel_" + p.id, "")!!.ifBlank { p.defaultModel } }
+    /** Providers with a key saved, the chosen one first: if it fails, Dune tries the next. */
+    fun withKeys(ctx: Context): List<Provider> = (listOf(provider(ctx)) + PROVIDERS).distinct().filter { readyFor(ctx, it.id) }
+
+    /** Whose key this looks like, from how it starts (null if it could be anyone's). */
+    fun providerForKey(k: String): String? = k.trim().let { when {
+        it.startsWith("sk-ant-") -> "claude"
+        it.startsWith("sk-or-") -> "openrouter"
+        it.startsWith("AIza") -> "gemini"
+        it.startsWith("sk-") -> "openai"
+        else -> null
+    } }
+
+    /** Ask [id]'s service for a one-word reply: null if the key and model work, otherwise what went wrong. */
+    suspend fun test(ctx: Context, id: String): String? = withContext(Dispatchers.IO) {
+        val p = PROVIDERS.first { it.id == id }
+        val key = keyFor(ctx, id) ?: return@withContext "no ${p.name} key saved"
+        runCatching { askPlain(p, key, modelFor(ctx, id), "Reply with the single word OK.", "Test", false, emptyList()); null }
+            .getOrElse { it.message ?: it.javaClass.simpleName }
+    }
 
     fun shareMessages(ctx: Context) = prefs(ctx).getBoolean("aiMessages", true)
     fun shareCalendar(ctx: Context) = prefs(ctx).getBoolean("aiCalendar", true)
@@ -298,29 +320,42 @@ background doesn't contain what he asks about, say so plainly rather than guessi
 
     suspend fun askFull(ctx: Context, store: Store, question: String, spoken: Boolean = false, remember: Boolean = true): Answer = withContext(Dispatchers.IO) {
         val hist = if (remember) Chat.history() else emptyList()
-        val a = askOnce(ctx, store, question, spoken, hist)
-        if (remember) Chat.add(question, a.text.substringBefore("\n(web search unavailable"))
+        val tries = withKeys(ctx).ifEmpty { throw IllegalStateException("Add an AI key in Dune's settings first") }
+        val sys = system(ctx, store, spoken, hist)
+        val failed = ArrayList<String>()
+        var a: Answer? = null
+        for (p in tries) {
+            try { a = askOnce(ctx, p, sys, question, spoken, hist); break }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (e: Exception) { failed += "${p.name}: ${e.message ?: e.javaClass.simpleName}" }
+        }
+        if (a == null) throw IllegalStateException(failed.joinToString("\n"))
+        if (failed.isNotEmpty()) a = a.copy(text = a.text + "\n(" + failed.joinToString("; ") { it.take(120) } + " – so another of your keys answered)")
+        if (remember) Chat.add(question, a.text.substringBefore("\n("))
         a
     }
 
-    private suspend fun askOnce(ctx: Context, store: Store, question: String, spoken: Boolean, hist: List<Pair<String, String>>): Answer = withContext(Dispatchers.IO) {
-        val key = key(ctx) ?: throw IllegalStateException("Add an AI key in Dune's settings first")
-        val p = provider(ctx); val model = model(ctx)
+    private suspend fun system(ctx: Context, store: Store, spoken: Boolean, hist: List<Pair<String, String>>): String {
         val web = webOn(ctx)
-        val sys = SYSTEM + (if (spoken) "\nHe is driving: answer in one or two short spoken sentences." else "") +
+        return SYSTEM + (if (spoken) "\nHe is driving: answer in one or two short spoken sentences." else "") +
             (if (web) "\nYou can search the web. Do so when the question needs current or outside facts (news, prices, opening times, " +
                 "tides, sports, travel, anything after your training); otherwise answer directly. Mention where facts came from in a few words." else "") +
             (if (hist.isNotEmpty()) "\nThe earlier messages are this conversation so far: read a short or vague question (\"and tomorrow?\", \"why?\", \"who wrote it?\") " +
                 "as following on from them. If it plainly starts a new subject, just answer that." else "") +
             "\n\nBACKGROUND\n" + context(ctx, store, locationLine(ctx))
-        if (web) runCatching { return@withContext askWeb(p, key, model, sys, question, spoken, hist) }
-            .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e
-                val plain = askPlain(p, key, model, sys, question, spoken, hist)
-                return@withContext plain.copy(text = plain.text + "\n(web search unavailable: ${e.message?.take(80)})") }
-        askPlain(p, key, model, sys, question, spoken, hist)
     }
 
-    private class Reply(val ok: Boolean, val code: Int, val json: JSONObject?)
+    private fun askOnce(ctx: Context, p: Provider, sys: String, question: String, spoken: Boolean, hist: List<Pair<String, String>>): Answer {
+        val key = keyFor(ctx, p.id) ?: throw IllegalStateException("no key saved")
+        val model = modelFor(ctx, p.id)
+        if (webOn(ctx)) runCatching { return askWeb(p, key, model, sys, question, spoken, hist) }
+            .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e
+                val plain = askPlain(p, key, model, sys, question, spoken, hist)
+                return plain.copy(text = plain.text + "\n(web search unavailable: ${e.message?.take(80)})") }
+        return askPlain(p, key, model, sys, question, spoken, hist)
+    }
+
+    private class Reply(val ok: Boolean, val code: Int, val json: JSONObject?, val raw: String = "")
     private fun post(url: String, body: JSONObject, headers: Map<String, String>): Reply {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"; c.doOutput = true; c.connectTimeout = 15_000; c.readTimeout = 90_000
@@ -329,10 +364,23 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         c.outputStream.use { it.write(body.toString().toByteArray()) }
         val ok = c.responseCode in 200..299
         val txt = (if (ok) c.inputStream else c.errorStream)?.bufferedReader()?.readText().orEmpty()
-        return Reply(ok, c.responseCode, runCatching { JSONObject(txt) }.getOrNull())
+        return Reply(ok, c.responseCode, runCatching { JSONObject(txt) }.getOrNull(), txt)
     }
-    private fun fail(r: Reply): Nothing = throw IllegalStateException(r.json?.optJSONObject("error")?.optString("message")?.ifBlank { null }
-        ?: r.json?.optString("message")?.ifBlank { null } ?: "HTTP ${r.code}")
+    private fun fail(r: Reply): Nothing = throw IllegalStateException(errorText(r.code, r.json, r.raw))
+
+    /** What went wrong, in words: the service's own message, and plainly when it's the key. Pure, for tests. */
+    fun errorText(code: Int, json: JSONObject?, raw: String = ""): String {
+        val j = json ?: runCatching { org.json.JSONArray(raw).optJSONObject(0) }.getOrNull()
+        val e = j?.opt("error")
+        val msg = (e as? JSONObject)?.optString("message")?.ifBlank { null } ?: (e as? String)?.ifBlank { null }
+            ?: j?.optString("message")?.ifBlank { null } ?: raw.trim().take(160).ifBlank { null }
+        val badKey = code == 401 || code == 403 || msg != null && Regex("(?i)api key not valid|valid api key|incorrect api key|invalid (x-)?api[- ]key|API_KEY_INVALID|unauthori[sz]ed|authentication").containsMatchIn(msg)
+        return when {
+            badKey -> "the key was refused – check it's the right one in Settings › Dune AI (HTTP $code: ${msg ?: "no reason given"})"
+            msg != null -> "HTTP $code: $msg"
+            else -> "HTTP $code"
+        }
+    }
     private fun auth(p: Provider, key: String) = buildMap {
         put("Authorization", "Bearer $key")
         if (p.id == "openrouter") { put("HTTP-Referer", "https://github.com/newbroman/Dune"); put("X-Title", "Dune") }
