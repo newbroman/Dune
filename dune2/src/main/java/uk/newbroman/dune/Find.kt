@@ -128,6 +128,9 @@ object Find {
         is Cmd.Media -> "Media: ${cmd.action}"
         is Cmd.TimeInPolish -> "The time in Polish"
         is Cmd.PhraseOfDay -> "Phrase of the day"
+        is Reminders.Set -> "Remind me: ${cmd.what}"
+        is Reminders.ListAll -> "Show my reminders"
+        is Reminders.Cancel -> "Cancel a reminder"
         is Cmd.Pictures -> "Show pictures of ${cmd.subject}"
         is Cmd.NewChat -> "New conversation (Dune AI forgets the last one)"
         is Cmd.Send -> (if (cmd.via == "sms") "Text " else if (cmd.via == "whatsapp") "WhatsApp " else "Message ") + cmd.rest

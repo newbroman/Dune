@@ -79,7 +79,7 @@ class PhoneCmdTest {
     }
 
     @Test fun reminders() {
-        assertEquals(Cmd.Alarm(17, 0, label = "call mum"), c("remind me to call mum at 5 pm"))
+        assertEquals(Reminders.Set("Call mum", null, 17, 0), c("remind me to call mum at 5 pm"))   // a reminder now, not an alarm
         assertEquals(Cmd.AddTask("Buy milk"), c("remind me to buy milk"))
     }
 }

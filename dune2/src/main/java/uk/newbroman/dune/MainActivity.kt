@@ -73,6 +73,11 @@ class MainActivity : ComponentActivity() {
         val cmd = Assistant.interpret(text)
         // Anything Dune can't do itself goes to the AI, if one is set up.
         // …except alarms and timers worded in a way Dune didn't catch: the AI can't set them, so say how to ask
+        if (cmd is Cmd.Unknown && Regex("\\b(remind|reminder|reminders)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
+            val r = "I didn't catch when. Try “remind me on Monday 30th November to read the gas meter”, “remind me tomorrow at 6 to put the bins out” " +
+                "or “remind me in 2 hours to ring Mum”. “What reminders do I have” and “cancel the gas meter reminder” work too."
+            vm.assistantReply = r; if (speak || voice) Speaker.speak(this, r); return
+        }
         if (cmd is Cmd.Unknown && Regex("\\b(alarm|timer|wake me)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) {
             val r = "I didn't catch the time in that. Try “set an alarm for 7 am”, “wake me up tomorrow at 6:30”, “alarm in 40 minutes”, " +
                 "“alarm every weekday at 7 called gym”, “cancel my 7 am alarm” or “what alarms do I have”."

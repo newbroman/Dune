@@ -109,6 +109,13 @@ object Assistant {
 
         // Alarm and timer
         (Alarms.parseOther(s) ?: Alarms.parse(s))?.let { return it }
+        // "remind me on Monday 30th November to read the gas meter" (no when at all → a task, below)
+        Reminders.parse(s)?.let { r ->
+            if (r !is Reminders.Set) return r
+            // keep the words as typed ("ring Anna", "BT bill")
+            val c = cased(t, s); val i = s.indexOf(r.what.lowercase())
+            return if (i >= 0 && c.length == s.length) r.copy(what = c.substring(i, i + r.what.length).replaceFirstChar { it.uppercase() }) else r
+        }
         Regex("^(set )?(a |the )?timer (for )?(\\S+) (second|minute|hour|min)s?$|^(\\S+) (second|minute|hour|min)s? timer$").find(s)?.let { m ->
             val n = num(m.groupValues[4].ifEmpty { m.groupValues[6] }) ?: return@let
             val unit = m.groupValues[5].ifEmpty { m.groupValues[7] }
@@ -224,6 +231,7 @@ object Assistant {
             is Cmd.AddTask -> { s.addTask(cmd.text); "Added task: ${cmd.text}" }
             is Cmd.Alarm -> Alarms.set(act, cmd)
             is Cmd.AlarmCancel -> Alarms.cancel(act, cmd)
+            is Reminders.R -> Reminders.run(act, cmd)
             is Cmd.AlarmList -> Alarms.list(act, vm.screen == Screen.DRIVE)
             is Cmd.Timer -> {
                 Alarms.clockError(act, Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, cmd.seconds)

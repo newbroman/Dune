@@ -302,22 +302,23 @@ object Alarms {
     }
     private fun describe(o: Own): String {
         val t = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(o.at), ZoneId.systemDefault())
-        return relDay(t) + " at " + hm(t.hour, t.minute) + (o.label?.let { " (“$it”)" } ?: "")
+        return (if (o.kind == Reminders.REMINDER) "a reminder " else "") + relDay(t) + " at " + hm(t.hour, t.minute) + (o.label?.let { " (“$it”)" } ?: "")
     }
 
     // ---------- Dune's own alarms ----------
 
-    data class Own(val id: Long, val at: Long, val label: String?)
+    /** [kind]: "alarm" rings until stopped; Reminders.REMINDER is a notification. */
+    data class Own(val id: Long, val at: Long, val label: String?, val kind: String = "alarm")
     private const val PREFS = "dune_alarms"; private const val CHANNEL = "dune_alarm"
     const val FIRE = "uk.newbroman.dune.ALARM_FIRE"; const val STOP = "uk.newbroman.dune.ALARM_STOP"; const val SNOOZE = "uk.newbroman.dune.ALARM_SNOOZE"
 
     fun load(ctx: Context): List<Own> = runCatching {
         val a = JSONArray(ctx.getSharedPreferences(PREFS, 0).getString("list", "[]"))
-        (0 until a.length()).map { a.getJSONObject(it) }.map { Own(it.getLong("id"), it.getLong("at"), it.optString("label").ifEmpty { null }) }
+        (0 until a.length()).map { a.getJSONObject(it) }.map { Own(it.getLong("id"), it.getLong("at"), it.optString("label").ifEmpty { null }, it.optString("kind").ifEmpty { "alarm" }) }
     }.getOrDefault(emptyList())
 
     private fun save(ctx: Context, l: List<Own>) = ctx.getSharedPreferences(PREFS, 0).edit()
-        .putString("list", JSONArray(l.map { JSONObject().put("id", it.id).put("at", it.at).put("label", it.label ?: "") }).toString()).apply()
+        .putString("list", JSONArray(l.map { JSONObject().put("id", it.id).put("at", it.at).put("label", it.label ?: "").put("kind", it.kind) }).toString()).apply()
 
     private fun firePi(ctx: Context, id: Long) = PendingIntent.getBroadcast(ctx, id.toInt(),
         Intent(ctx, AlarmReceiver::class.java).setAction(FIRE).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -342,18 +343,20 @@ object Alarms {
         save(ctx, load(ctx).filter { it.id != o.id })
     }
 
-    /** After a restart: set them all again; any that fell due while the phone was off are dropped. */
+    /** After a restart: set them all again; alarms that fell due while the phone was off are dropped, reminders shown. */
     fun reschedule(ctx: Context) {
         val now = System.currentTimeMillis()
         val (keep, gone) = load(ctx).partition { it.at > now }
         save(ctx, keep)
         keep.forEach { schedule(ctx, it) }
+        gone.filter { it.kind == Reminders.REMINDER }.forEach { Reminders.show(ctx, it) }
         if (gone.isNotEmpty()) android.util.Log.i("Dune", "dropped ${gone.size} alarm(s) missed while off")
     }
 
     fun ring(ctx: Context, id: Long) {
         val o = load(ctx).firstOrNull { it.id == id }
         save(ctx, load(ctx).filter { it.id != id })
+        if (o?.kind == Reminders.REMINDER) { Reminders.show(ctx, o); return }
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Alarms", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -394,6 +397,8 @@ class AlarmReceiver : BroadcastReceiver() {
             Alarms.FIRE -> Alarms.ring(ctx, i.getLongExtra("id", 0))
             Alarms.STOP -> Alarms.stop(ctx)
             Alarms.SNOOZE -> Alarms.snooze(ctx, i.getStringExtra("label"))
+            Reminders.DONE -> ctx.getSystemService(NotificationManager::class.java).cancel(i.getIntExtra("nid", 0))
+            Reminders.LATER -> Reminders.later(ctx, i.getIntExtra("nid", 0), i.getStringExtra("label"))
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, "android.intent.action.TIME_SET",
             "android.intent.action.TIMEZONE_CHANGED" -> Alarms.reschedule(ctx)
         }
