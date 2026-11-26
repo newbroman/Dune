@@ -45,6 +45,10 @@ object Briefing {
         if (Geo.hasPermission(act)) runCatching { Phone.weather(act, PhoneCmd.Weather(0, null, false)) }.getOrNull()?.let { parts += "$it." }
         if (act.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED)
             runCatching { Phone.agenda(act, PhoneCmd.Agenda(0)) }.getOrNull()?.let { parts += it.replaceFirst("today:", "today –") + "." }
+        // the next place to be today, and when to set off for it
+        LeaveNow.events(act).firstOrNull { java.time.Instant.ofEpochMilli(it.begin).atZone(ZoneId.systemDefault()).toLocalDate() == today }?.let {
+            kotlinx.coroutines.withTimeoutOrNull(20_000) { runCatching { LeaveNow.answer(act) }.getOrNull() }?.let { a -> parts += a }
+        }
         val z = ZoneId.systemDefault()
         val dune = Alarms.load(act).map { it to LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(it.at), z) }.filter { it.second.toLocalDate() == today && it.second.isAfter(now) }
         val rem = dune.filter { it.first.kind == Reminders.REMINDER }.sortedBy { it.second }

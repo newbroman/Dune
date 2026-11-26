@@ -1,5 +1,7 @@
 package uk.newbroman.dune
 
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -111,6 +113,7 @@ object Assistant {
         (Alarms.parseOther(s) ?: Alarms.parse(s))?.let { return it }
         // "good morning", "brief me": the day in one go
         Briefing.parse(s)?.let { return it }
+        LeaveNow.parse(s)?.let { return it }
         // "remember that my boiler is a Worcester", "what do you remember", "forget that my…"
         Memory.parse(s)?.let { m -> return if (m is Memory.Remember) Memory.Remember(cased(t, s).let { c -> val i = s.lastIndexOf(m.text)
             if (i >= 0 && c.length == s.length) c.substring(i, i + m.text.length) else m.text }) else m }
@@ -238,6 +241,13 @@ object Assistant {
             is Cmd.AlarmCancel -> Alarms.cancel(act, cmd)
             is Reminders.R -> Reminders.run(act, cmd)
             is Memory.M -> Memory.run(act, cmd)
+            LeaveWhen -> {
+                act.lifecycleScope.launch {
+                    val a = runCatching { LeaveNow.answer(act) }.getOrElse { "Couldn't work that out (${it.javaClass.simpleName})" }
+                    vm.assistantReply = a; if (act.lastAskSpoken || vm.screen == Screen.DRIVE) Speaker.speak(act, a)
+                }
+                "Working out the journey…"
+            }
             Brief -> Briefing.run(act, vm, act.lastAskSpoken || vm.screen == Screen.DRIVE)
             is Cmd.AlarmList -> Alarms.list(act, vm.screen == Screen.DRIVE)
             is Cmd.Timer -> {

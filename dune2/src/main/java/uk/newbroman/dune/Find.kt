@@ -132,6 +132,7 @@ object Find {
         is Memory.Recall -> "What Dune remembers"
         is Memory.Forget -> "Forget: ${cmd.text}"
         is Brief -> "Your briefing"
+        is LeaveWhen -> "When do I need to leave?"
         is Reminders.Set -> "Remind me: ${cmd.what}"
         is Reminders.ListAll -> "Show my reminders"
         is Reminders.Cancel -> "Cancel a reminder"

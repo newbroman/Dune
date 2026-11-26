@@ -310,6 +310,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) openedFile(intent)
         vm.actionHook = { acts -> AiActions.run(this, vm, acts) }
         Briefing.schedule(this)
+        LeaveNow.plan(this)
         if (savedInstanceState == null) briefingIntent(intent)
         onBackPressedDispatcher.addCallback(this) { vm.back() }
         setContent { DuneApp(vm) }
@@ -352,6 +353,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        LeaveNow.remember(this)   // where the phone is, for leave-now checks made while Dune is in the background
         vm.onResume()
         vm.media.listen()   // notification access may have just been granted
         WakeWord.sync(this)   // in the car: start the wake word now Dune is on screen (it can't start from the background)

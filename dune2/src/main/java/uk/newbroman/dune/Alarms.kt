@@ -1,5 +1,7 @@
 package uk.newbroman.dune
 
+import kotlinx.coroutines.launch
+
 import android.Manifest
 import android.app.Activity
 import android.app.AlarmManager
@@ -362,6 +364,7 @@ object Alarms {
         keep.forEach { schedule(ctx, it) }
         gone.filter { it.kind == Reminders.REMINDER }.forEach { Reminders.show(ctx, it); Reminders.again(ctx, it) }
         Briefing.schedule(ctx)
+        LeaveNow.plan(ctx)
         if (gone.isNotEmpty()) android.util.Log.i("Dune", "dropped ${gone.size} alarm(s) missed while off")
     }
 
@@ -410,6 +413,13 @@ class AlarmReceiver : BroadcastReceiver() {
             Alarms.STOP -> Alarms.stop(ctx)
             Alarms.SNOOZE -> Alarms.snooze(ctx, i.getStringExtra("label"))
             Briefing.FIRE -> { Briefing.ready(ctx); Briefing.schedule(ctx) }
+            LeaveNow.CHECK -> {
+                // a journey to work out: keep the receiver alive for it (Android allows up to about half a minute)
+                val r = goAsync()
+                kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                    try { kotlinx.coroutines.withTimeoutOrNull(25_000) { LeaveNow.check(ctx) } } finally { r.finish() }
+                }
+            }
             Reminders.DONE -> ctx.getSystemService(NotificationManager::class.java).cancel(i.getIntExtra("nid", 0))
             Reminders.LATER -> Reminders.later(ctx, i.getIntExtra("nid", 0), i.getStringExtra("label"))
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, "android.intent.action.TIME_SET",

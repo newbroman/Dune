@@ -279,6 +279,32 @@ fun AiSettings(vm: LauncherVM) {
         listOf("06:30", "07:00", "07:30", "08:00", "08:30", "09:00").forEach { t -> Chip(if (t == bt) "✓ $t" else t) { Briefing.setTime(act, t); tick++ } }
         Chip(if (bt == null) "✓ Off" else "Off") { Briefing.setTime(act, null); tick++ }
     }
+
+    // ---- leave-now warnings
+    Text("Leave-now warnings", color = Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+    val lon = remember(tick) { LeaveNow.on(act) }
+    Row(Modifier.fillMaxWidth().combinedClickable { LeaveNow.setOn(act, !lon); tick++ }.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Tell me when to set off", color = Fg, fontSize = 16.sp, modifier = Modifier.weight(1f))
+        Switch(checked = lon, onCheckedChange = null)
+    }
+    Note("For calendar events with a place in them: Dune works out the journey from where you are and puts up a notification with Directions when it's time to go. Ask “when do I need to leave?” any time.")
+    if (lon) {
+        val spare = remember(tick) { LeaveNow.spare(act) }; val mode = remember(tick) { LeaveNow.mode(act) }
+        FlowRow {
+            listOf("car" to "Driving", "foot" to "Walking", "bike" to "Cycling").forEach { (m, l) -> Chip(if (m == mode) "✓ $l" else l) { LeaveNow.setMode(act, m); tick++ } }
+        }
+        FlowRow(Modifier.padding(bottom = 4.dp)) {
+            listOf(5, 10, 15, 20, 30).forEach { m -> Chip(if (m == spare) "✓ $m min spare" else "$m min spare") { LeaveNow.setSpare(act, m); tick++ } }
+        }
+        if (!cal) LinkRow("Allow calendar access") { act.requestPerm(Manifest.permission.READ_CALENDAR) { tick++; LeaveNow.plan(act) } }
+        val bg = remember(tick) { LeaveNow.backgroundAllowed(act) }
+        if (!bg) {
+            Note("Location is only allowed while Dune is open, so a check made in the background uses where Dune last saw you (up to 3 hours old).")
+            LinkRow("Allow location all the time (Permissions › Location)") {
+                act.tryStart(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.parse("package:" + act.packageName)))
+            }
+        }
+    }
 }
 
 @Composable
