@@ -109,6 +109,11 @@ object Assistant {
 
         // Alarm and timer
         (Alarms.parseOther(s) ?: Alarms.parse(s))?.let { return it }
+        // "good morning", "brief me": the day in one go
+        Briefing.parse(s)?.let { return it }
+        // "remember that my boiler is a Worcester", "what do you remember", "forget that my…"
+        Memory.parse(s)?.let { m -> return if (m is Memory.Remember) Memory.Remember(cased(t, s).let { c -> val i = s.lastIndexOf(m.text)
+            if (i >= 0 && c.length == s.length) c.substring(i, i + m.text.length) else m.text }) else m }
         // "remind me on Monday 30th November to read the gas meter" (no when at all → a task, below)
         Reminders.parse(s)?.let { r ->
             if (r !is Reminders.Set) return r
@@ -232,6 +237,8 @@ object Assistant {
             is Cmd.Alarm -> Alarms.set(act, cmd)
             is Cmd.AlarmCancel -> Alarms.cancel(act, cmd)
             is Reminders.R -> Reminders.run(act, cmd)
+            is Memory.M -> Memory.run(act, cmd)
+            Brief -> Briefing.run(act, vm, act.lastAskSpoken || vm.screen == Screen.DRIVE)
             is Cmd.AlarmList -> Alarms.list(act, vm.screen == Screen.DRIVE)
             is Cmd.Timer -> {
                 Alarms.clockError(act, Intent(AlarmClock.ACTION_SET_TIMER).putExtra(AlarmClock.EXTRA_LENGTH, cmd.seconds)

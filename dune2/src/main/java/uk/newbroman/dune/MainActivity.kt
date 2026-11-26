@@ -308,6 +308,9 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE
         }
         if (savedInstanceState == null) openedFile(intent)
+        vm.actionHook = { acts -> AiActions.run(this, vm, acts) }
+        Briefing.schedule(this)
+        if (savedInstanceState == null) briefingIntent(intent)
         onBackPressedDispatcher.addCallback(this) { vm.back() }
         setContent { DuneApp(vm) }
     }
@@ -316,9 +319,18 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (voiceIntent(intent)) return
+        if (briefingIntent(intent)) return
         if (openedFile(intent)) { vm.goHome(); vm.jumpHub = "map"; return }
         if (intent.getBooleanExtra("drive", false) && Drive.fromDune(this, intent)) { intent.removeExtra("drive"); Drive.set(this, true); vm.screen = Screen.DRIVE }
         else { vm.goHome(); intent.getStringExtra("hub")?.let { intent.removeExtra("hub"); vm.jumpHub = it } }
+    }
+
+    /** The morning briefing notification was tapped: read it out. */
+    private fun briefingIntent(intent: Intent?): Boolean {
+        if (intent?.getBooleanExtra("briefing", false) != true) return false
+        intent.removeExtra("briefing"); vm.goHome()
+        vm.assistantReply = Briefing.run(this, vm, speak = true)
+        return true
     }
 
     /** "OK Computer" was heard, or a car / headset voice button was pressed: open the Speak prompt. */

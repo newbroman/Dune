@@ -157,12 +157,15 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     fun askAi(question: String, speak: Boolean = false, sayIt: Boolean = false, onAnswer: (String) -> Unit = { assistantReply = it }) {
         if (aiBusy) { onAnswer("Still thinking about the last question… (tap Stop to drop it)"); return }
-        aiBusy = true; assistantSources = emptyList(); onAnswer(if (Brain.webOn(ctx)) "Thinking (and searching if it needs to)…" else "Thinking…")
+        aiBusy = true; assistantSources = emptyList(); aiPending = emptyList(); onAnswer(if (Brain.webOn(ctx)) "Thinking (and searching if it needs to)…" else "Thinking…")
         aiJob = viewModelScope.launch {
             val full = try { Brain.askFull(ctx, store, question, spoken = speak) }
                 catch (e: kotlinx.coroutines.CancellationException) { throw e }
                 catch (e: Exception) { Brain.Answer("AI: " + (e.message ?: "something went wrong")) }
-            val a = full.text
+            // the AI may have asked Dune to do things: take those lines out and do them
+            val (shown, acts) = AiActions.split(full.text)
+            val done = if (acts.isNotEmpty()) actionHook?.invoke(acts).orEmpty() else ""
+            val a = listOf(shown, done).filter { it.isNotBlank() }.joinToString("\n").ifBlank { "Done." }
             assistantSources = full.sources
             aiBusy = false; onAnswer(a)
             if (speak || sayIt) Speaker.speak(ctx, a)
@@ -196,6 +199,10 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
     var pick by mutableStateOf<Pick?>(null)
     /** "show me a picture of…": what was found, shown under the answer. */
     var pictures by mutableStateOf<Pictures.Found?>(null)
+    /** Things Dune AI set up that wait for a tap (send, call, calendar, directions). */
+    var aiPending by mutableStateOf<List<AiActions.Pending>>(emptyList())
+    /** Set by MainActivity: carries out the action lines in an AI answer, returning what was done. */
+    var actionHook: ((List<org.json.JSONObject>) -> String)? = null
     /** Show a saved track (GPX path) on the map hub. */
     var mapTrackRequest by mutableStateOf<String?>(null)
     /** Map files to add as layers (opened with Dune from another app). */

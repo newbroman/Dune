@@ -191,6 +191,7 @@ object Brain {
     /** The background the AI is given: today's date, your tasks, recent messages, your calendar. */
     fun context(ctx: Context, store: Store, location: String? = null): String = buildString {
         appendLine("Now: " + fmt.format(Date()) + " (phone's local time, " + java.util.TimeZone.getDefault().id + ").")
+        append(Memory.background(ctx))
         location?.let { appendLine(it) }
         if (shareTasks(ctx)) {
             val open = store.tasks.filter { !it.done }
@@ -206,7 +207,7 @@ object Brain {
             val log = InboxLog.all(ctx).takeLast(150)
             appendLine("\nMESSAGES AND EMAILS (last 7 days, oldest first; app · from · text):")
             if (log.isEmpty()) appendLine("none")
-            log.forEach { appendLine("- ${fmt.format(Date(it.time))} · ${it.app} · ${it.title} · ${redact(it.text).take(400)}") }
+            log.forEach { appendLine("- ${fmt.format(Date(it.time))} · ${it.app} · ${it.title} · ${redact(it.text).take(400).replace("[[", "[ [")}") }
         }
     }
 
@@ -342,6 +343,7 @@ background doesn't contain what he asks about, say so plainly rather than guessi
                 "tides, sports, travel, anything after your training); otherwise answer directly. Mention where facts came from in a few words." else "") +
             (if (hist.isNotEmpty()) "\nThe earlier messages are this conversation so far: read a short or vague question (\"and tomorrow?\", \"why?\", \"who wrote it?\") " +
                 "as following on from them. If it plainly starts a new subject, just answer that." else "") +
+            AiActions.PROMPT +
             "\n\nBACKGROUND\n" + context(ctx, store, locationLine(ctx))
     }
 

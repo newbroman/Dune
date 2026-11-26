@@ -307,6 +307,11 @@ internal fun AssistantBlock(vm: LauncherVM) {
             }
         }
     }
+    // what Dune AI set up that waits for a tap: send, call, calendar, directions
+    if (vm.aiPending.isNotEmpty()) FlowRow(Modifier.padding(top = 4.dp)) {
+        vm.aiPending.forEach { p -> Chip(p.label) { AiActions.tap(act, vm, p) } }
+        Chip("✕") { vm.aiPending = emptyList() }
+    }
     Pictures.Panel(vm)
     Listen.PickPanel(vm)
     if (!Brain.ready(act)) vm.assistantFallback?.let { f ->

@@ -23,7 +23,10 @@ object Reminders {
     sealed class R : Cmd()
     /** [inMinutes] for "in 2 hours"; otherwise [date] (null = today/tomorrow by the clock) and [hour]:[minute] (null = 9:00). */
     data class Set(val what: String, val date: LocalDate?, val hour: Int?, val minute: Int?, val inMinutes: Int? = null,
-                   val dayMismatch: Boolean = false) : R()
+                   val dayMismatch: Boolean = false, val repeat: String? = null) : R()
+
+    /** How often: "daily", "weekdays", "weekly", "monthly", "yearly" (null = once). */
+    val REPEATS = listOf("daily", "weekdays", "weekly", "monthly", "yearly")
     object ListAll : R()
     data class Cancel(val what: String?) : R()
 
@@ -56,6 +59,35 @@ object Reminders {
         var r = " " + s.substring(l.range.last + 1).trim() + " "
         var date: LocalDate? = null; var hour: Int? = null; var minute: Int? = null; var inMin: Int? = null; var mismatch = false
         fun cut(m: MatchResult) { r = r.replaceRange(m.range, " ") }
+
+        // how often: "every day", "every Monday", "on the 1st of every month", "every month", "yearly"
+        var repeat: String? = null
+        Regex(" (?:on )?(?:the )?(?:$D) (?:of )?(?:every|each) month | (?:every|each) month on the (?:$D) ").find(r)?.let { m ->
+            val g = m.groupValues
+            val d = day(g[1].ifEmpty { g[3] }.ifEmpty { null }, g[2].ifEmpty { g[4] }.ifEmpty { null })
+            if (d != null && d in 1..31) {
+                repeat = "monthly"
+                var x = today.withDayOfMonth(minOf(d, today.lengthOfMonth()))
+                if (x.isBefore(today)) today.plusMonths(1).let { n -> x = n.withDayOfMonth(minOf(d, n.lengthOfMonth())) }
+                date = x; cut(m)
+            }
+        }
+        if (repeat == null) Regex(" (?:every|each) (day|morning|evening|night|afternoon) | daily ").find(r)?.let { m ->
+            repeat = "daily"
+            val part0 = m.groupValues[1]
+            if (part0.isNotEmpty() && part0 != "day") r = r.replaceRange(m.range, " $part0 ") else cut(m)
+        }
+        if (repeat == null) Regex(" (?:every|each|on) (?:weekday|working day|work day)s? | (?:on )?weekdays ").find(r)?.let { m -> repeat = "weekdays"; cut(m) }
+        if (repeat == null) Regex(" (?:every|each) ($WD) | on ($WD)s ").find(r)?.let { m ->
+            repeat = "weekly"
+            val want = weekday(m.groupValues[1].ifEmpty { m.groupValues[2] })
+            var d = today; while (d.dayOfWeek != want) d = d.plusDays(1)
+            date = d; cut(m)
+        }
+        if (repeat == null) Regex(" (?:every|each) (week|fortnight|month|year) | (weekly|monthly|yearly|annually) ").find(r)?.let { m ->
+            repeat = when (m.groupValues[1].ifEmpty { m.groupValues[2] }) { "week", "weekly" -> "weekly"; "month", "monthly" -> "monthly"; else -> "yearly" }
+            cut(m)
+        }
 
         // "in 2 hours", "in 20 minutes", "in 3 days", "in a week"
         Regex(" in (\\S+|an|a) (minute|min|hour|day|week)s?(?: and a half)? ").find(r)?.let { m ->
@@ -123,12 +155,12 @@ object Reminders {
         if (hour == null && part != null) { hour = when (part) { "afternoon" -> 14; "evening", "night" -> 18; else -> 9 }; minute = 0 }
         if (hour != null && hour!! in 1..6 && part == null && !s.contains(Regex("\\d ?am|morning"))) hour = hour!! + 12   // "at 6" for a reminder is 6 pm
 
-        if (date == null && hour == null && inMin == null) return null       // no when: a task, not a reminder
+        if (date == null && hour == null && inMin == null && repeat == null) return null       // no when: a task, not a reminder
         val what = r.replace(Regex("\\s+"), " ").trim()
             .replace(Regex("^(?:to|about|that|i need to|i have to|i must|i should|we need to|for|of)\\s+"), "")
             .replace(Regex("\\s+(?:to|on|at|for)$"), "").trim()
         if (what.isEmpty()) return null
-        return Set(what.replaceFirstChar { it.uppercase() }, date, hour, minute, inMin, mismatch)
+        return Set(what.replaceFirstChar { it.uppercase() }, date, hour, minute, inMin, mismatch, repeat)
     }
 
     private fun dated(today: LocalDate, mo: String, d: Int?, y: Int?): LocalDate? {
@@ -159,11 +191,15 @@ object Reminders {
     fun run(act: MainActivity, c: R): String = when (c) {
         is Set -> {
             val now = LocalDateTime.now()
-            val t = moment(c, now)
+            var t = moment(c, now)
+            if (c.repeat != null) while (!t.isAfter(now)) t = next(t, c.repeat)
             if (!t.isAfter(now)) "That time has already gone – say when again?"
             else {
-                val ok = Alarms.schedule(act, Alarms.Own(System.currentTimeMillis(), t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), c.what, REMINDER))
+                val first = if (c.repeat == "weekdays") nextWeekday(t, now) else t
+                val ok = Alarms.schedule(act, Alarms.Own(System.currentTimeMillis(), first.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), c.what, REMINDER, c.repeat))
                 if (!ok) "Dune isn't allowed to set exact alarms, which reminders need – allow it in the screen that just opened, then ask again"
+                else if (c.repeat != null) "I'll remind you ${often(c.repeat, first)}, starting ${whenText(first, now)}: “${c.what}”." +
+                    (if (c.hour == null) " Say a time to change it, e.g. “…at 6 pm”." else "")
                 else "I'll remind you ${whenText(t, now)}: “${c.what}”." +
                     (if (c.dayMismatch) " (Note: that date is a ${t.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }}.)" else "") +
                     (if (c.hour == null && c.inMinutes == null) " Say a time to change it, e.g. “…at 6 pm”." else "")
@@ -174,7 +210,8 @@ object Reminders {
             val mine = Alarms.load(act).filter { it.kind == REMINDER }.sortedBy { it.at }
             if (mine.isEmpty()) "No reminders set."
             else "Your reminders: " + mine.joinToString("; ") { o ->
-                whenText(LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(o.at), ZoneId.systemDefault()), now) + " – " + (o.label ?: "reminder") } + "."
+                LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(o.at), ZoneId.systemDefault()).let { t ->
+                    whenText(t, now) + " – " + (o.label ?: "reminder") + (o.repeat?.let { " (${often(it, t)})" } ?: "") } } + "."
         }
         is Cancel -> {
             val mine = Alarms.load(act).filter { it.kind == REMINDER }.sortedBy { it.at }
@@ -211,6 +248,41 @@ object Reminders {
             .addAction(android.app.Notification.Action.Builder(null, "In an hour", pi(LATER, 2)).build())
             .build()
         nm.notify(nid, n)
+    }
+
+    /** "every day", "every Monday", "on the 30th of every month", … */
+    fun often(repeat: String, t: LocalDateTime): String = when (repeat) {
+        "daily" -> "every day"
+        "weekdays" -> "every weekday"
+        "weekly" -> "every " + t.dayOfWeek.name.lowercase().replaceFirstChar { it.uppercase() }
+        "monthly" -> "on the ${t.dayOfMonth}${suffix(t.dayOfMonth)} of every month"
+        "yearly" -> "every year on ${t.format(DateTimeFormatter.ofPattern("d MMMM", Locale.UK))}"
+        else -> repeat
+    }
+    private fun suffix(d: Int) = if (d in 11..13) "th" else when (d % 10) { 1 -> "st"; 2 -> "nd"; 3 -> "rd"; else -> "th" }
+    private fun nextWeekday(t: LocalDateTime, now: LocalDateTime): LocalDateTime {
+        var x = t; while (x.dayOfWeek == DayOfWeek.SATURDAY || x.dayOfWeek == DayOfWeek.SUNDAY || !x.isAfter(now)) x = x.plusDays(1); return x
+    }
+
+    /** The next time a repeating reminder falls after [t] (it keeps its day of the month, short months taking their last day). */
+    fun next(t: LocalDateTime, repeat: String, dayOfMonth: Int = t.dayOfMonth): LocalDateTime = when (repeat) {
+        "daily" -> t.plusDays(1)
+        "weekdays" -> { var x = t.plusDays(1); while (x.dayOfWeek == DayOfWeek.SATURDAY || x.dayOfWeek == DayOfWeek.SUNDAY) x = x.plusDays(1); x }
+        "weekly" -> t.plusWeeks(1)
+        "monthly" -> t.plusMonths(1).let { it.withDayOfMonth(minOf(dayOfMonth, it.toLocalDate().lengthOfMonth())) }
+        "yearly" -> t.plusYears(1)
+        else -> t
+    }
+
+    /** A repeating reminder has just been shown: set the next one. */
+    fun again(ctx: Context, o: Alarms.Own) {
+        val r = o.repeat ?: return
+        val z = ZoneId.systemDefault()
+        var t = LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(o.at), z)
+        val dom = o.dom ?: t.dayOfMonth
+        val now = LocalDateTime.now()
+        do t = next(t, r, dom) while (!t.isAfter(now))
+        Alarms.schedule(ctx, o.copy(id = o.id + 1, at = t.atZone(z).toInstant().toEpochMilli(), dom = dom))
     }
 
     fun later(ctx: Context, nid: Int, label: String?) {

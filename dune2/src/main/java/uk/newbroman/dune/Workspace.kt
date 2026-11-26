@@ -254,6 +254,31 @@ fun AiSettings(vm: LauncherVM) {
     val contacts = remember(tick) { Find.canReadContacts(act) }
     if (!contacts) LinkRow("Allow contacts (to find people from the app list)") { act.requestPerm(Manifest.permission.READ_CONTACTS) { tick++ } }
     LinkRow("Forget the saved message history (${InboxLog.all(act).size})") { InboxLog.clear(act); tick++ }
+
+    // ---- what Dune has been asked to remember
+    Text("What Dune remembers", color = Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+    val facts = remember(tick) { Memory.load(act).asReversed() }
+    if (facts.isEmpty()) Note("Nothing yet. Say “remember that my boiler is a Worcester Greenstar” and Dune AI will know it from then on.")
+    else {
+        Note("Given to Dune AI with every question. Tap ✕ to forget one.")
+        facts.forEach { f ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(f.text, color = Fg, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                Text("✕", color = Dim, fontSize = 16.sp, modifier = Modifier.combinedClickable { Memory.remove(act, f.id); tick++ }.padding(8.dp))
+            }
+        }
+        LinkRow("Forget all ${facts.size}") { Memory.clear(act); tick++ }
+    }
+
+    // ---- the morning briefing
+    Text("Morning briefing", color = Dim, fontSize = 13.sp, modifier = Modifier.padding(top = 14.dp, bottom = 2.dp))
+    val bt = remember(tick) { Briefing.time(act) }
+    Note("Weather, today's calendar, reminders, tasks and messages since last night. Say “good morning” or “brief me” any time" +
+        if (bt == null) "; or have it ready each morning:" else "; ready each morning at $bt (a notification – tap it to hear it).")
+    FlowRow(Modifier.padding(bottom = 4.dp)) {
+        listOf("06:30", "07:00", "07:30", "08:00", "08:30", "09:00").forEach { t -> Chip(if (t == bt) "✓ $t" else t) { Briefing.setTime(act, t); tick++ } }
+        Chip(if (bt == null) "✓ Off" else "Off") { Briefing.setTime(act, null); tick++ }
+    }
 }
 
 @Composable

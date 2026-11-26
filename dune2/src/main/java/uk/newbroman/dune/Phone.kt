@@ -320,7 +320,7 @@ object Phone {
         }
     }
 
-    private suspend fun weather(ctx: Context, c: PhoneCmd.Weather): String {
+    suspend fun weather(ctx: Context, c: PhoneCmd.Weather): String {
         val place = if (c.place != null) Geo.lookup(c.place) ?: return "I couldn't find ${c.place}"
             else Geo.current(ctx) ?: return if (Geo.hasPermission(ctx)) "I couldn't get your location" else "Allow location for local weather (Settings › Voice commands check)"
         val url = String.format(Locale.US, "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f" +
@@ -347,7 +347,7 @@ object Phone {
             "$desc, high $hi°, low $lo°" + (if (rain >= 0) ", $rain% chance of rain" else "") + ", wind up to $wind mph"
     }
 
-    private fun agenda(act: MainActivity, c: PhoneCmd.Agenda): String {
+    fun agenda(act: MainActivity, c: PhoneCmd.Agenda): String {
         if (act.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
             act.requestPerm(Manifest.permission.READ_CALENDAR) { ok -> if (ok) act.runCmd(c) }
             return "Allow Dune to read your calendar and I'll carry on"

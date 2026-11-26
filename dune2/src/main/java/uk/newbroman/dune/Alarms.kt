@@ -221,6 +221,16 @@ object Alarms {
         return "Alarm set for ${hm(h, m)}$whenText$named"
     }
 
+    /** An alarm at a given moment (from Dune AI): within a day it goes to the Clock app, later Dune rings it. */
+    fun setAt(act: MainActivity, t: LocalDateTime, label: String?): String {
+        val now = LocalDateTime.now()
+        if (!t.isAfter(now)) return "That alarm time has already gone"
+        if (!t.isAfter(now.plusHours(24))) return set(act, Cmd.Alarm(t.hour, t.minute, emptyList(), 0, null, label))
+        val ok = schedule(act, Own(System.currentTimeMillis(), t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli(), label))
+        return if (ok) "Alarm set for ${t.format(dayFmt)} at ${hm(t.hour, t.minute)}" + (label?.let { " – “$it”" } ?: "")
+            else "Dune isn't allowed to set exact alarms – allow it in the screen that just opened, then ask again"
+    }
+
     /** Hand [i] to the Clock app; null if it took it, otherwise why not (logged, for adb logcat -s Dune). */
     fun clockError(ctx: Context, i: Intent): String? = try {
         ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); null
@@ -308,17 +318,18 @@ object Alarms {
     // ---------- Dune's own alarms ----------
 
     /** [kind]: "alarm" rings until stopped; Reminders.REMINDER is a notification. */
-    data class Own(val id: Long, val at: Long, val label: String?, val kind: String = "alarm")
+    data class Own(val id: Long, val at: Long, val label: String?, val kind: String = "alarm", val repeat: String? = null, val dom: Int? = null)
     private const val PREFS = "dune_alarms"; private const val CHANNEL = "dune_alarm"
     const val FIRE = "uk.newbroman.dune.ALARM_FIRE"; const val STOP = "uk.newbroman.dune.ALARM_STOP"; const val SNOOZE = "uk.newbroman.dune.ALARM_SNOOZE"
 
     fun load(ctx: Context): List<Own> = runCatching {
         val a = JSONArray(ctx.getSharedPreferences(PREFS, 0).getString("list", "[]"))
-        (0 until a.length()).map { a.getJSONObject(it) }.map { Own(it.getLong("id"), it.getLong("at"), it.optString("label").ifEmpty { null }, it.optString("kind").ifEmpty { "alarm" }) }
+        (0 until a.length()).map { a.getJSONObject(it) }.map { Own(it.getLong("id"), it.getLong("at"), it.optString("label").ifEmpty { null }, it.optString("kind").ifEmpty { "alarm" },
+            it.optString("repeat").ifEmpty { null }, it.optInt("dom", 0).takeIf { d -> d > 0 }) }
     }.getOrDefault(emptyList())
 
     private fun save(ctx: Context, l: List<Own>) = ctx.getSharedPreferences(PREFS, 0).edit()
-        .putString("list", JSONArray(l.map { JSONObject().put("id", it.id).put("at", it.at).put("label", it.label ?: "").put("kind", it.kind) }).toString()).apply()
+        .putString("list", JSONArray(l.map { JSONObject().put("id", it.id).put("at", it.at).put("label", it.label ?: "").put("kind", it.kind).put("repeat", it.repeat ?: "").put("dom", it.dom ?: 0) }).toString()).apply()
 
     private fun firePi(ctx: Context, id: Long) = PendingIntent.getBroadcast(ctx, id.toInt(),
         Intent(ctx, AlarmReceiver::class.java).setAction(FIRE).putExtra("id", id), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
@@ -349,14 +360,15 @@ object Alarms {
         val (keep, gone) = load(ctx).partition { it.at > now }
         save(ctx, keep)
         keep.forEach { schedule(ctx, it) }
-        gone.filter { it.kind == Reminders.REMINDER }.forEach { Reminders.show(ctx, it) }
+        gone.filter { it.kind == Reminders.REMINDER }.forEach { Reminders.show(ctx, it); Reminders.again(ctx, it) }
+        Briefing.schedule(ctx)
         if (gone.isNotEmpty()) android.util.Log.i("Dune", "dropped ${gone.size} alarm(s) missed while off")
     }
 
     fun ring(ctx: Context, id: Long) {
         val o = load(ctx).firstOrNull { it.id == id }
         save(ctx, load(ctx).filter { it.id != id })
-        if (o?.kind == Reminders.REMINDER) { Reminders.show(ctx, o); return }
+        if (o?.kind == Reminders.REMINDER) { Reminders.show(ctx, o); Reminders.again(ctx, o); return }
         val nm = ctx.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Alarms", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -397,6 +409,7 @@ class AlarmReceiver : BroadcastReceiver() {
             Alarms.FIRE -> Alarms.ring(ctx, i.getLongExtra("id", 0))
             Alarms.STOP -> Alarms.stop(ctx)
             Alarms.SNOOZE -> Alarms.snooze(ctx, i.getStringExtra("label"))
+            Briefing.FIRE -> { Briefing.ready(ctx); Briefing.schedule(ctx) }
             Reminders.DONE -> ctx.getSystemService(NotificationManager::class.java).cancel(i.getIntExtra("nid", 0))
             Reminders.LATER -> Reminders.later(ctx, i.getIntExtra("nid", 0), i.getStringExtra("label"))
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED, "android.intent.action.TIME_SET",
