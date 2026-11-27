@@ -166,7 +166,7 @@ object Brain {
         val p = PROVIDERS.first { it.id == id }
         val key = keyFor(ctx, id) ?: return@withContext "no ${p.name} key saved"
         runCatching { askPlain(p, key, modelFor(ctx, id), "Reply with the single word OK.", "Test", false, emptyList()); null }
-            .getOrElse { it.message ?: it.javaClass.simpleName }
+            .getOrElse { if (it is java.net.UnknownHostException || it is java.net.ConnectException || it is java.net.SocketTimeoutException) offline(ctx, it as Exception) else it.message ?: it.javaClass.simpleName }
     }
 
     fun shareMessages(ctx: Context) = prefs(ctx).getBoolean("aiMessages", true)
@@ -328,7 +328,7 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         for (p in tries) {
             try { a = askOnce(ctx, p, sys, question, spoken, hist); break }
             catch (e: kotlinx.coroutines.CancellationException) { throw e }
-            catch (e: Exception) { failed += "${p.name}: ${e.message ?: e.javaClass.simpleName}" }
+            catch (e: Exception) { failed += "${p.name}: " + if (e is java.net.UnknownHostException || e is java.net.ConnectException || e is java.net.SocketTimeoutException) offline(ctx, e) else (e.message ?: e.javaClass.simpleName) }
         }
         if (a == null) throw IllegalStateException(failed.joinToString("\n"))
         if (failed.isNotEmpty()) a = a.copy(text = a.text + "\n(" + failed.joinToString("; ") { it.take(120) } + " – so another of your keys answered)")
@@ -369,6 +369,27 @@ background doesn't contain what he asks about, say so plainly rather than guessi
         return Reply(ok, c.responseCode, runCatching { JSONObject(txt) }.getOrNull(), txt)
     }
     private fun fail(r: Reply): Nothing = throw IllegalStateException(errorText(r.code, r.json, r.raw))
+
+    /**
+     * "Unable to resolve host …" means Dune couldn't reach the internet at all, not that the key is wrong. Say why, as far as
+     * the phone can tell: no connection, a Wi-Fi with no internet, Private DNS that isn't answering, or Dune itself kept off the
+     * network (some phones, Doogee's among them, let each app's Wi-Fi and mobile data be switched off).
+     */
+    fun offline(ctx: Context, e: Exception): String {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java)
+        val net = cm?.activeNetwork; val caps = net?.let { cm.getNetworkCapabilities(it) }
+        val lp = net?.let { cm.getLinkProperties(it) }
+        val host = (e.message ?: "").substringAfter('"', "").substringBefore('"').ifBlank { "the AI service" }
+        return "couldn't reach $host – " + when {
+            net == null || caps == null -> "the phone has no internet connection (Wi-Fi off or no signal?)"
+            !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) ->
+                if (caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) "the Wi-Fi is connected but has no internet (a router problem, or a sign-in page?)"
+                else "the connection has no internet just now"
+            lp?.isPrivateDnsActive == true && lp.privateDnsServerName != null ->
+                "Private DNS (${lp.privateDnsServerName}) didn't answer: try Settings › Network › Private DNS › Automatic"
+            else -> "other apps are online, so Dune itself may be kept off the network: Settings › Apps › Dune › Mobile data & Wi-Fi (or Data usage), allow both"
+        }
+    }
 
     /** What went wrong, in words: the service's own message, and plainly when it's the key. Pure, for tests. */
     fun errorText(code: Int, json: JSONObject?, raw: String = ""): String {
