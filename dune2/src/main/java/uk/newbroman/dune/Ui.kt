@@ -291,10 +291,17 @@ internal fun AssistantBlock(vm: LauncherVM) {
     }
     vm.assistantReply?.let {
         Text(it, color = Dim, fontSize = 14.sp, modifier = Modifier.padding(top = 6.dp, start = 4.dp)
-            .combinedClickable { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList(); vm.pictures = null })
+            .combinedClickable(onLongClick = { copyAnswer(act, vm) }) { vm.assistantReply = null; vm.assistantFallback = null; vm.assistantSources = emptyList(); vm.pictures = null })
         // The web pages it used: tap to open. While Dune remembers the conversation, a follow-up can just
         // say "and tomorrow?" – "New conversation" makes it forget.
         val remembered = Brain.Chat.size
+        // copy or share the answer (with the web pages it used); a long press on the answer copies it too
+        if (!vm.aiBusy && !it.endsWith("…")) FlowRow(Modifier.padding(top = 4.dp)) {
+            Chip("⧉ Copy") { copyAnswer(act, vm) }
+            Chip("↗ Share") {
+                act.tryStart(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, answerText(vm)), "Share Dune's answer"))
+            }
+        }
         if (vm.assistantSources.isNotEmpty() || (remembered > 0 && !vm.aiBusy)) FlowRow(Modifier.padding(top = 4.dp)) {
             vm.assistantSources.forEach { (title, url) ->
                 Chip("↗ " + title.take(28).ifBlank { android.net.Uri.parse(url).host ?: "source" }) {
@@ -1527,4 +1534,14 @@ internal fun NextUpLine(vm: LauncherVM) {
     Text("Next: ${n.second} · $whenS", color = if (mins in 0..30 && !n.third) Sand else Dim, fontSize = 15.sp, maxLines = 1,
         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
         modifier = Modifier.fillMaxWidth().combinedClickable { Actions.openCalendar(ctx) }.padding(top = 4.dp, bottom = 2.dp))
+}
+
+/** Dune's answer as text to copy or share: the answer, then the web pages it used. */
+fun answerText(vm: LauncherVM): String = (vm.assistantReply ?: "") +
+    if (vm.assistantSources.isEmpty()) "" else "\n\nSources:\n" + vm.assistantSources.joinToString("\n") { (t, u) -> if (t.isBlank()) u else "$t – $u" }
+
+fun copyAnswer(act: MainActivity, vm: LauncherVM) {
+    val t = answerText(vm).ifBlank { return }
+    act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Dune", t))
+    if (android.os.Build.VERSION.SDK_INT < 33) act.toast("Copied")   // Android 13+ shows its own "copied" note
 }
