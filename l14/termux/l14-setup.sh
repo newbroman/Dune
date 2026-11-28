@@ -18,6 +18,13 @@
 # none, turns on allow-external-apps so Dune can run commands in Termux, and finishes by putting your
 # key on the L14 if it can reach it. Safe to run again. Nothing here holds secrets.
 set -u
+# This is the PHONE's half: it runs in Termux. Pasted into a shell on the L14 (or any other computer) it would
+# write its settings there and then fail on "pkg" – so it stops first and says where to run it.
+case "${PREFIX:-}" in *com.termux*) ;; *)
+  echo "This is for Termux on the phone, not $(hostname 2>/dev/null || echo this computer)."
+  echo "If you're logged into the L14 over ssh, type exit first, then paste it at Termux's own prompt (~ \$)."
+  exit 1 ;;
+esac
 main() {
   local BASE="https://raw.githubusercontent.com/newbroman/Dune/main/l14/termux"
   local CONF_DIR="$HOME/.config/dune" CONF="$HOME/.config/dune/l14.conf"
