@@ -674,9 +674,29 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             var ok = false
             for (i in 0 until 8) { if (Actions.reachable(host, port)) { ok = true; break }; delay(1500) }
             l14Online = ok
-            if (!ok) { l14Step = "The L14 isn't answering on $host:$port – is it awake and on Tailscale?" + if (store.l14Mac.value.isNotBlank()) " (try Wake)" else ""; return@launch }
+            if (!ok) { l14Step = whyNoL14(host, port); return@launch }
             l14Step = "L14 answering – opening Termux…"
             L14Connect.connect(act, store); delay(4000); l14Step = null
+        }
+    }
+
+    /**
+     * The L14 didn't answer: say which link is broken. Dune itself kept off the network (the per-app Wi-Fi / mobile data
+     * switches on Doogee and others – Tailscale and Termux are online but Dune isn't) looks just like the L14 being away.
+     */
+    private suspend fun whyNoL14(host: String, port: Int): String {
+        val app = getApplication<Application>()
+        val vpn = L14Connect.vpnOn(app)
+        val internet = Actions.reachable("1.1.1.1", 443) || Actions.reachable("8.8.8.8", 443)
+        return when {
+            !internet && vpn -> "Dune itself can't reach the network (Tailscale is on) – Settings › Apps › Dune › Mobile data & Wi-Fi " +
+                "(or Data usage › App network access): allow both, then Connect again"
+            !internet -> "No internet from Dune – check the phone's connection, then Dune's own Wi-Fi and mobile data permission (Settings › Apps › Dune)"
+            !vpn -> "Tailscale is off on this phone – turn it on above, then Connect again"
+            !Regex("^100\\.|\\.ts\\.net$|^[a-z0-9-]+$").containsMatchIn(host) -> "The L14 isn't answering at $host:$port – that isn't a Tailscale address; " +
+                "use the L14's 100.x address (Settings › L14)"
+            else -> "The L14 isn't answering at $host:$port – Tailscale is on here, so check the L14 is awake and on Tailscale (and that the address in Settings › L14 is its current one)" +
+                if (store.l14Mac.value.isNotBlank()) " (try Wake)" else ""
         }
     }
 
@@ -691,6 +711,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             val online = Actions.reachable(host, port)
             l14Online = online
             vpnOn = L14Connect.vpnOn(getApplication())
+            if (force) l14Step = if (online) null else whyNoL14(host, port)
             val token = l14Token()
             if (!online || token.isEmpty()) { l14StatusErr = null; return@launch }
             val sport = store.l14StatusPort.value.trim().toIntOrNull() ?: 8714
