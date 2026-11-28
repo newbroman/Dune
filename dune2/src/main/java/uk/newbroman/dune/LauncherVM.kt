@@ -672,7 +672,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             }
             l14Step = "Tailscale on – waiting for the L14…"
             var ok = false
-            for (i in 0 until 8) { if (Actions.reachable(host, port)) { ok = true; break }; delay(1500) }
+            for (i in 0 until 4) { if (Actions.reachable(host, port)) { ok = true; break }; delay(1000) }
             l14Online = ok
             if (!ok) { l14Step = whyNoL14(host, port); return@launch }
             l14Step = "L14 answering – opening Termux…"
@@ -695,7 +695,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
             !vpn -> "Tailscale is off on this phone – turn it on above, then Connect again"
             !Regex("^100\\.|\\.ts\\.net$|^[a-z0-9-]+$").containsMatchIn(host) -> "The L14 isn't answering at $host:$port – that isn't a Tailscale address; " +
                 "use the L14's 100.x address (Settings › L14)"
-            else -> "The L14 isn't answering at $host:$port – Tailscale is on here, so check the L14 is awake and on Tailscale (and that the address in Settings › L14 is its current one)" +
+            else -> "The L14 isn't answering at $host:$port (${Actions.probe(host, port) ?: "it answered on a second try – tap Check"}) – Tailscale is on here, so check the L14 is awake and on Tailscale (and that the address in Settings › L14 is its current one)" +
                 if (store.l14Mac.value.isNotBlank()) " (try Wake)" else ""
         }
     }

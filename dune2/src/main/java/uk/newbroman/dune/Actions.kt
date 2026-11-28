@@ -207,8 +207,24 @@ object Actions {
         else "ssh -t -p $port $target ${q(remote)}"
     }
 
-    suspend fun reachable(host: String, port: Int): Boolean = withContext(Dispatchers.IO) {
-        try { Socket().use { it.connect(InetSocketAddress(host, port), 1500) }; true } catch (e: Exception) { false }
+    /**
+     * Does [host] take a connection on [port]? Two tries: over Tailscale the first packet to a quiet peer starts a
+     * WireGuard handshake, often through a relay, and that alone can take a few seconds – the old 1.5 s check called a
+     * perfectly good L14 "not answering" while ssh from Termux, which waits, got straight in.
+     */
+    suspend fun reachable(host: String, port: Int): Boolean = probe(host, port) == null
+
+    /** null if [host]:[port] answered, otherwise why not ("timed out", "refused", "no route"…). */
+    suspend fun probe(host: String, port: Int): String? = withContext(Dispatchers.IO) {
+        var why: String? = null
+        for (t in intArrayOf(2500, 7000)) {
+            why = try { Socket().use { it.connect(InetSocketAddress(host, port), t) }; return@withContext null }
+            catch (e: java.net.SocketTimeoutException) { "timed out" }
+            catch (e: java.net.ConnectException) { if (e.message?.contains("refused", true) == true) return@withContext "refused – nothing listening on port $port" else (e.message ?: "couldn't connect") }
+            catch (e: java.net.UnknownHostException) { return@withContext "unknown address" }
+            catch (e: Exception) { e.message ?: e.javaClass.simpleName }
+        }
+        why
     }
 
     /** Wake-on-LAN magic packet to the local broadcast address. */
