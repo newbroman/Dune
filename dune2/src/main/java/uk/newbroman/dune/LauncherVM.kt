@@ -20,6 +20,7 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -116,6 +117,9 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         private set
     var l14Online by mutableStateOf<Boolean?>(null)
         private set
+    /** What Connect is doing, step by step ("Turning Tailscale on…"), shown in the L14 hub. */
+    var l14Step by mutableStateOf<String?>(null)
+    var vpnOn by mutableStateOf(false)
     /** Last report from l14-status.py; kept (shown as "as of") while the L14 is offline. */
     var l14Status by mutableStateOf<L14Status?>(null)
         private set
@@ -648,6 +652,34 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
 
     private var l14At = 0L
     /** Is the L14 up, and its warnings. Coming back to Dune checks at most every 5 minutes; taps check now. */
+    /**
+     * Connect, a step at a time, saying each one: Tailscale on (asked of the Tailscale app, no need to open it), the L14
+     * answering, then Termux takes over (ssh/mosh into tmux). Stops at the first step that fails and says what to do.
+     */
+    fun connectL14(act: MainActivity) {
+        val host = store.l14Host.value.trim(); if (host.isEmpty()) { act.toast("Set the L14's address in Settings › L14 first"); return }
+        val port = store.l14Port.value.trim().toIntOrNull() ?: 22
+        l14Job?.cancel()
+        l14Job = viewModelScope.launch {
+            if (Actions.reachable(host, port)) { l14Online = true; l14Step = "L14 answering – opening Termux…"; L14Connect.connect(act, store); delay(4000); l14Step = null; return@launch }
+            val ts = act.isInstalled(L14Connect.TAILSCALE_APP)
+            if (ts && !L14Connect.vpnOn(act)) {
+                l14Step = "Turning Tailscale on…"
+                L14Connect.tailscaleOn(act)
+                for (i in 0 until 20) { delay(500); if (L14Connect.vpnOn(act)) break }
+                vpnOn = L14Connect.vpnOn(act)
+                if (!vpnOn) { l14Step = "Tailscale didn't come on – tap Open Tailscale and switch it on (it may need logging in), then Connect again"; l14Online = false; return@launch }
+            }
+            l14Step = "Tailscale on – waiting for the L14…"
+            var ok = false
+            for (i in 0 until 8) { if (Actions.reachable(host, port)) { ok = true; break }; delay(1500) }
+            l14Online = ok
+            if (!ok) { l14Step = "The L14 isn't answering on $host:$port – is it awake and on Tailscale?" + if (store.l14Mac.value.isNotBlank()) " (try Wake)" else ""; return@launch }
+            l14Step = "L14 answering – opening Termux…"
+            L14Connect.connect(act, store); delay(4000); l14Step = null
+        }
+    }
+
     fun checkL14(force: Boolean = true) {
         val host = store.l14Host.value.trim()
         if (!store.showL14.value || host.isEmpty()) { l14Online = null; return }
@@ -658,6 +690,7 @@ class LauncherVM(app: Application) : AndroidViewModel(app) {
         l14Job = viewModelScope.launch {
             val online = Actions.reachable(host, port)
             l14Online = online
+            vpnOn = L14Connect.vpnOn(getApplication())
             val token = l14Token()
             if (!online || token.isEmpty()) { l14StatusErr = null; return@launch }
             val sport = store.l14StatusPort.value.trim().toIntOrNull() ?: 8714

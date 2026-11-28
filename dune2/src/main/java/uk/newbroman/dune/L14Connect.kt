@@ -92,6 +92,38 @@ object L14Connect {
         Actions.termux(act, installCommand(asset(act, SCRIPT_ASSET), asset(act, SETUP_ASSET), env), paste)
     }
 
+    // ---------- Tailscale, from Dune
+
+    /** A VPN is up on the phone (with the Tailscale app installed, that is Tailscale). */
+    fun vpnOn(ctx: Context): Boolean {
+        val cm = ctx.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        @Suppress("DEPRECATION")
+        return cm.allNetworks.any { n -> cm.getNetworkCapabilities(n)?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true }
+    }
+
+    /**
+     * Ask the Tailscale app to connect, without opening it: its automation activity (newer versions), else the broadcast its
+     * IPNReceiver takes (the one Tasker uses). A Tailscale that has never been logged in still needs opening once.
+     */
+    fun tailscaleOn(ctx: Context): Boolean {
+        val a = Intent("com.tailscale.ipn.CONNECT_VPN").setPackage(TAILSCALE_APP).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (ctx.tryStart(a)) return true
+        return runCatching { ctx.sendBroadcast(Intent("com.tailscale.ipn.CONNECT_VPN").setClassName(TAILSCALE_APP, "com.tailscale.ipn.IPNReceiver")); true }.getOrDefault(false)
+    }
+
+    fun tailscaleOff(ctx: Context) {
+        if (ctx.tryStart(Intent("com.tailscale.ipn.DISCONNECT_VPN").setPackage(TAILSCALE_APP).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))) return
+        runCatching { ctx.sendBroadcast(Intent("com.tailscale.ipn.DISCONNECT_VPN").setClassName(TAILSCALE_APP, "com.tailscale.ipn.IPNReceiver")) }
+    }
+
+    /** Where Termux stands: not installed, the Google Play build (no commands from Dune), Dune not yet allowed, or ready. */
+    fun termuxState(ctx: Context): String = when {
+        !ctx.isInstalled(Actions.TERMUX_PKG) -> "missing"
+        !Actions.termuxSupportsRunCommand(ctx) -> "play"
+        ctx.checkSelfPermission(TERMUX_PERMISSION) != android.content.pm.PackageManager.PERMISSION_GRANTED -> "ask"
+        else -> "ready"
+    }
+
     fun ignoringBattery(ctx: Context, pkg: String): Boolean =
         ctx.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(pkg) == true
 

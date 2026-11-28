@@ -68,6 +68,7 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -497,11 +498,12 @@ internal fun L14Block(vm: LauncherVM) {
     }
     L14Warnings(vm)
     NrgTasks(vm)
+    L14Steps(vm)
     val hasTermius = remember(vm.resumeTick) { act.isInstalled(TERMIUS) }
     FlowRow {
         val sc = vm.l14Shortcut
-        // Connect: Termux runs ~/bin/l14 – wake lock, Tailscale up (login in the browser if needed), mosh/ssh into tmux
-        Chip("Connect") { L14Connect.connect(act, s) }
+        // Connect: Tailscale on, the L14 answering, then Termux runs ~/bin/l14 (wake lock, mosh/ssh into tmux)
+        Chip("Connect") { vm.connectL14(act as MainActivity) }
         Chip("SSH") { if (sc != null) vm.launchPinned(sc) else Actions.termux(act, Actions.sshCommand(s)) }
         if (hasTermius) Chip("Termius") { act.launchPackage(TERMIUS) }
         if (s.l14Mac.value.isNotBlank()) Chip("Wake") { vm.wakeL14() }
@@ -1544,4 +1546,62 @@ fun copyAnswer(act: MainActivity, vm: LauncherVM) {
     val t = answerText(vm).ifBlank { return }
     act.getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("Dune", t))
     if (android.os.Build.VERSION.SDK_INT < 33) act.toast("Copied")   // Android 13+ shows its own "copied" note
+}
+
+/**
+ * The three things a connection to the L14 needs, each with its state and a button for it: Tailscale on, the L14 answering,
+ * Termux able to take commands from Dune. Then what Connect is doing, and why a browser page might open.
+ */
+@Composable
+internal fun L14Steps(vm: LauncherVM) {
+    val act = LocalContext.current as MainActivity
+    val s = vm.store
+    val tick = vm.resumeTick
+    val hasTs = remember(tick) { act.isInstalled(L14Connect.TAILSCALE_APP) }
+    val vpn = remember(tick, vm.vpnOn, vm.l14Online) { L14Connect.vpnOn(act) }
+    val tx = remember(tick) { L14Connect.termuxState(act) }
+    LaunchedEffect(tick) { vm.checkL14(force = false) }
+    val ok = Color(0xFF7FB77E); val bad = Color(0xFFE0806A)
+    @Composable fun step(good: Boolean?, what: String, why: String, chips: @Composable () -> Unit) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(when (good) { true -> "●"; false -> "○"; null -> "·" }, color = when (good) { true -> ok; false -> bad; null -> Dim }, fontSize = 15.sp, modifier = Modifier.width(22.dp))
+            Column(Modifier.weight(1f)) { Text(what, color = Fg, fontSize = 15.sp); Text(why, color = Dim, fontSize = 12.sp) }
+        }
+        FlowRow(Modifier.padding(start = 22.dp)) { chips() }
+    }
+    step(if (hasTs) vpn else false, "Tailscale " + when { !hasTs -> "app not installed"; vpn -> "on"; else -> "off" },
+        if (hasTs) "the private network between the phone and the L14" else "install it from Play Store and log in once") {
+        if (!hasTs) Chip("Get Tailscale") { act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=" + L14Connect.TAILSCALE_APP))) }
+        else {
+            if (!vpn) Chip("Turn on") { L14Connect.tailscaleOn(act); act.lifecycleScope.launch { repeat(16) { kotlinx.coroutines.delay(500); if (L14Connect.vpnOn(act)) { vm.vpnOn = true; vm.checkL14(); return@launch } }; act.toast("Tailscale didn't come on – open it and switch it on") } }
+            else Chip("Turn off") { L14Connect.tailscaleOff(act); act.lifecycleScope.launch { kotlinx.coroutines.delay(1500); vm.vpnOn = L14Connect.vpnOn(act) } }
+            Chip("Open Tailscale") { act.launchPackage(L14Connect.TAILSCALE_APP) }
+        }
+    }
+    val port = s.l14Port.value.trim().ifEmpty { "22" }
+    step(vm.l14Online, "L14 " + when (vm.l14Online) { true -> "answering"; false -> "not answering"; null -> "not checked yet" },
+        "${s.l14Host.value.trim()} port $port" + if (vm.l14Online == false && !vpn && hasTs) " – turn Tailscale on first" else "") {
+        Chip("Check") { vm.checkL14() }
+        if (s.l14Mac.value.isNotBlank()) Chip("Wake") { vm.wakeL14() }
+    }
+    step(tx == "ready", "Termux " + when (tx) { "missing" -> "not installed"; "play" -> "(Google Play version)"; "ask" -> "needs Dune's permission"; else -> "ready" },
+        when (tx) {
+            "missing" -> "install it from F-Droid (the Play Store version can't take commands from Dune)"
+            "play" -> "Dune copies each command for you to paste – the F-Droid version runs them itself"
+            "ask" -> "allow “Run commands in Termux environment”, then tap set up Termux once"
+            else -> "Connect opens a session that logs in with ssh (or mosh) into tmux on the L14"
+        }) {
+        when (tx) {
+            "missing" -> Chip("Termux on F-Droid") { act.tryStart(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://f-droid.org/packages/com.termux/"))) }
+            "ask" -> Chip("Allow") { act.requestPerm(TERMUX_PERMISSION) { } }
+            else -> {}
+        }
+        if (tx != "missing") {
+            Chip("set up Termux") { L14Connect.setup(act, s) }
+            Chip("Copy ssh command") { L14Connect.copy(act, "ssh", Actions.sshCommand(s)) }
+        }
+    }
+    vm.l14Step?.let { Text(it, color = Sand, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)) }
+    Text("If a browser page opens while connecting, it's Tailscale asking you to approve the login (Tailscale SSH in “check” mode): approve it, then switch back to Termux.",
+        color = Dim, fontSize = 12.sp, modifier = Modifier.padding(top = 2.dp, bottom = 6.dp))
 }

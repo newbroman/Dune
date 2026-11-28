@@ -194,6 +194,8 @@ object Actions {
         ctx.packageManager.getPermissionInfo(TERMUX_PERMISSION, 0); true
     } catch (e: Exception) { false }
 
+    const val TERMUX_PKG = TERMUX
+
     // ---------- L14 ----------
 
     private fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
