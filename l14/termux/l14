@@ -16,7 +16,10 @@
 #        - or the Tailscale Android app: opens it and waits for the L14 to answer;
 #   3. connects – mosh when both ends have it (survives the phone sleeping and changing
 #      network), else ssh with keepalives – into a tmux session called "dune" on the L14,
-#      so a dropped connection comes back to the same shell.
+#      so a dropped connection comes back to the same shell;
+#   4. with ssh, a dropped connection ("Broken pipe", the phone slept, the network changed)
+#      reconnects by itself, back into the same tmux session, until you log out (exit/Ctrl-D)
+#      or press Ctrl-C during the countdown. L14_RECONNECT=0 turns that off.
 #
 # Dune (the launcher) runs this with L14_HOST / L14_USER / L14_PORT / TS_APP set.
 # Installed by l14-setup.sh (https://github.com/newbroman/Dune, l14/termux/).
@@ -248,6 +251,28 @@ if [ "$MOSH" != no ] && command -v mosh >/dev/null 2>&1; then
   fi
 fi
 
-say "ssh → $USER_@$HOST (tmux '$TMUX_SESSION')"
-ssh -t "${SSH_OPTS[@]}" "${PROXY[@]}" "$USER_@$HOST" "$REMOTE"   # not exec: the wake lock is released on exit
-exit $?
+# ssh: a connection that drops (exit 255: broken pipe, timeout, network gone) comes back by itself. tmux on the L14
+# kept everything running meanwhile, so you land where you were. Logging out (exit, Ctrl-D) ends it as usual.
+RECONNECT=${L14_RECONNECT:-1}
+TRIES=0
+while :; do
+  say "ssh → $USER_@$HOST (tmux '$TMUX_SESSION')"
+  START=$SECONDS
+  ssh -t "${SSH_OPTS[@]}" "${PROXY[@]}" "$USER_@$HOST" "$REMOTE"   # not exec: the wake lock is released on exit
+  RC=$?
+  [ "$RECONNECT" = 1 ] && [ $RC -eq 255 ] || exit $RC
+  # a connection that lasted a while starts the count again; one that keeps failing at once gives up after 20 tries
+  [ $((SECONDS - START)) -gt 60 ] && TRIES=0
+  TRIES=$((TRIES + 1))
+  [ $TRIES -gt 20 ] && { say "the connection keeps failing – giving up (run l14 again to retry)"; exit $RC; }
+  echo
+  say "connection dropped – reconnecting in 3 s (Ctrl-C to stop)"
+  sleep 3 || exit $RC
+  # wait for the network (and Tailscale) to come back before trying again
+  for _i in $(seq 1 30); do
+    if [ "$VIA" = tailscale-termux ]; then [ "$(ts_backend_state)" = Running ] && break
+    elif reachable "$HOST" "$PORT"; then break; fi
+    [ "$_i" = 1 ] && say "waiting for $HOST to answer…"
+    sleep 2
+  done
+done

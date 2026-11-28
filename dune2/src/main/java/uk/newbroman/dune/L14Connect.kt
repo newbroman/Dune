@@ -78,7 +78,14 @@ object L14Connect {
     /** The Connect chip: Termux opens and ~/bin/l14 takes it from there. */
     fun connect(act: Activity, s: Store) {
         if (s.l14Host.value.isBlank()) { act.toast("Set the L14's address in Settings › L14 first"); return }
-        Actions.termux(act, connectCommand(env(s, act)))
+        Actions.termux(act, refreshCommand(asset(act, SCRIPT_ASSET)) + connectCommand(env(s, act)), connectCommand(env(s, act)))
+    }
+
+    /** Puts this Dune's copy of ~/bin/l14 in place before connecting, so a fix to the script needs no new "set up Termux". */
+    fun refreshCommand(script: String): String {
+        val d = delimiter(script)
+        return "if [ -x \"\$HOME/bin/l14\" ]; then cat > \"\$HOME/bin/l14.new\" <<'$d'\n${script.trimEnd('\n')}\n$d\n" +
+            "chmod +x \"\$HOME/bin/l14.new\" && mv -f \"\$HOME/bin/l14.new\" \"\$HOME/bin/l14\"; fi; "
     }
 
     /** One-time setup, pushed into Termux by Dune. The paste line is on the clipboard too, in case Termux can't be driven yet. */
